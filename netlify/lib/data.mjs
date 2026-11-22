@@ -72,6 +72,7 @@ export const BASE_CHANNEL_TYPES = {
   support: "Support (Ticket-Panel)",
   bewerbung: "Staff-Bewerbung",
   admin: "Admin (Bewerbungen & Ticket-Log)",
+  adminpanel: "Admin-Panel (Turnierleitung)",
   eaabort: "EA-Abbrüche (nur Staff)",
   eastatus: "EA-Status: welche Spiele EA erfasst hat (nur Staff)",
   teamstats: "Team-Statistiken (All-Time)",

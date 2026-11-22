@@ -46,6 +46,23 @@ export async function refreshOverview() {
   await refreshEaLinks().catch((e) => console.error("EA-Verknüpfungen:", e?.message || e));
 }
 
+/** ⚙️ Admin-Panel im Admin-Kanal posten bzw. aktualisieren (Status des aktuellen Cups) */
+export async function refreshAdminPanel() {
+  const cfg = await getConfig(); const ch = cfg.channels.adminpanel || cfg.channels.admin; if (!ch) return;
+  const t = await currentCup();
+  const p = await panels();
+  const id = await upsertMessage(ch, p.adminpanel, (await import("./adminpanel.mjs")).adminPanel(t));
+  if (id && id !== p.adminpanel) await savePanel("adminpanel", id);
+}
+/** Aktueller Cup: laufend, sonst die Anmeldung im Anmelde-Kanal, sonst der zuletzt beendete */
+export async function currentCup() {
+  const cfg = await getConfig();
+  const act = await activeTournament();
+  if (act) return act;
+  const s = cfg.channels.signup ? await get(tKey(cfg.channels.signup)) : null;
+  return s && !["abgesagt", "geloescht"].includes(s.status) ? s : null;
+}
+
 /** 📊 Team-Statistiken (All-Time) als Bild – aktualisiert sich bei neuen Teams, Logos, EA-IDs und nach jedem Cup */
 export async function refreshTeamStats() {
   const cfg = await getConfig(); if (!cfg.channels.teamstats) return;
@@ -166,6 +183,7 @@ export async function launchTournament({ channelId, name, times, day, date }, { 
 }
 
 export async function refreshSignup(t) {
+  refreshAdminPanel().catch(() => {});
   if (!t.msgs.panel) return;
   const id = await upsertMessage(t.channelId, t.msgs.panel, V.signupPanel(t, await getClubs()));
   if (id && id !== t.msgs.panel) await mutate(tKey(t.channelId), (x) => { x.msgs.panel = id; });
@@ -341,6 +359,7 @@ export async function videoSubmitted(t, v) {
 }
 // ---------- Aktualisieren ----------
 export async function refreshLive(t) {
+  refreshAdminPanel().catch(() => {});
   const cfg = await getConfig();
   if (!cfg.channels.live) return;
   // Live-Spielplan als Bild (Apex-Look); falls das Bild nicht klappt: Text wie bisher

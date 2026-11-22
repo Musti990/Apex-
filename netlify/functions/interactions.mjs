@@ -12,6 +12,7 @@ import { baseNameOf, nickFor, setNick } from "../lib/names.mjs";
 import * as AS from "../lib/autosetup.mjs";
 import * as EAF from "../lib/eaflow.mjs";
 import * as EA from "../lib/ea.mjs";
+import * as AP from "../lib/adminpanel.mjs";
 import * as SUP from "../lib/support.mjs";
 import * as AU from "../lib/audit.mjs";
 import * as SH from "../lib/shop.mjs";
@@ -137,6 +138,77 @@ async function uploadLogo(i, context) {
   });
 }
 
+// ---------- ⚙️ Admin-Panel ----------
+/** Kanal des aktuellen Cups (laufend, sonst Anmelde-Kanal) */
+async function cupChannel(cfg) { const t = await F.currentCup(); return t?.channelId || cfg.channels.signup || null; }
+/** Panel-Klick → gleicher Ablauf wie der passende /cup-admin-Befehl */
+const asCmd = (i, ch, name, sub, options = []) => ({ ...i, channel_id: ch || i.channel_id, data: { name, options: [{ name: sub, type: 1, options }] } });
+
+async function adminPanelClick(i, context, cfg) {
+  if (!isAdmin(i, cfg)) return eph("Das Admin-Panel darf nur die **Turnierleitung** benutzen.");
+  const id = i.data.custom_id, ch = await cupChannel(cfg);
+  const run = (sub, options = []) => admin(asCmd(i, ch, "cup-admin", sub, options), context, cfg);
+  switch (id) {
+    case "adm:new": return AP.newCupModal();
+    case "adm:close": return run("anmeldeschluss");
+    case "adm:ciend": return run("checkin-ende");
+    case "adm:cancel": return eph("⚠️ **Cup wirklich abbrechen?** Alle Turnier-Rollen werden entfernt, Ergebnisse zählen nicht.", { components: [{ type: 1, components: [{ type: 2, style: 2, label: "Nein", custom_id: "adm:nop" }, { type: 2, style: 4, label: "Ja, abbrechen", custom_id: "adm:cancelok" }] }] });
+    case "adm:cancelok": { const r = await run("abbrechen"); return r; }
+    case "adm:nop": return { type: 7, data: { content: "Abgebrochen – nichts passiert.", components: [] } };
+    case "adm:add": {
+      const t = await F.currentCup();
+      if (!t || !["anmeldung", "checkin"].includes(t.status)) return eph("Teams hinzufügen geht nur während **Anmeldung** oder **Check-in**.");
+      const names = Object.keys(await getClubs()).filter((n) => !t.reg.includes(n)).sort((a, b) => a.localeCompare(b, "de"));
+      return eph("", AP.teamPick("adm:addpick", names, "**➕ Welches Team soll auf die Liste?**" + (t.status === "checkin" ? "\n-# Im Check-in wird es gleich eingecheckt." : "")));
+    }
+    case "adm:addpick": {
+      const name = i.data.values?.[0];
+      return background(i, context, async () => {
+        const { value: t } = await mutate(tKey(ch), (x) => { if (!["anmeldung", "checkin"].includes(x.status)) throw new Error("Anmeldung/Check-in ist schon vorbei."); if (!x.reg.includes(name)) T.register(x, name); if (x.status === "checkin" && !x.checked.includes(name)) T.checkIn(x, name); });
+        await F.refreshSignup(t);
+        return `✅ **${V.esc(name)}** ist jetzt auf der Liste${t.status === "checkin" ? " und eingecheckt" : ""}.`;
+      }, { update: true });
+    }
+    case "adm:rem": {
+      const t = await F.currentCup();
+      if (!t || !t.reg?.length) return eph("Gerade ist niemand angemeldet.");
+      return eph("", AP.teamPick("adm:rempick", t.reg.filter((n) => !/^freilos/i.test(n)), "**➖ Welches Team soll abgemeldet werden?**"));
+    }
+    case "adm:rempick": return admin(asCmd(i, ch, "cup-admin", "abmelden", [{ name: "verein", value: i.data.values?.[0] }]), context, cfg);
+    case "adm:fl+": return run("freilos-hinzufügen");
+    case "adm:fl-": return run("freilos-entfernen");
+    case "adm:games": return run("spiele");
+    case "adm:result": return AP.resultModal();
+    case "adm:ea": return AP.eaModal();
+    case "adm:tott": return run("tott");
+    case "adm:test": return admin(asCmd(i, cfg.channels.adminpanel || cfg.channels.admin || i.channel_id, "cup-admin", "testcup-start", [{ name: "teams", value: 8 }]), context, cfg);
+    case "adm:testgo": return run("testcup-weiter");
+    case "adm:panels": return setup(asCmd(i, i.channel_id, "cup-einrichten", "panels"), context, cfg);
+    case "adm:perms": return setup(asCmd(i, i.channel_id, "cup-einrichten", "rechte"), context, cfg);
+    case "adm:status": return setup(asCmd(i, i.channel_id, "cup-einrichten", "status"), context, cfg);
+    case "adm:refresh": return { type: 7, data: AP.adminPanel(await F.currentCup()) };
+  }
+  return eph("Unbekannte Aktion.");
+}
+
+async function adminPanelModal(i, context, cfg, v) {
+  if (!isAdmin(i, cfg)) return eph("Nur für die Turnierleitung.");
+  const id = i.data.custom_id, ch = await cupChannel(cfg);
+  if (id === "admm:new") {
+    const target = cfg.channels.signup || i.channel_id;
+    return manualCup({ ...i, channel_id: target, data: { name: "cup-turnier", options: [{ name: "name", value: v.name }, { name: "anpfiff", value: v.anpfiff }] } }, context);
+  }
+  if (id === "admm:result") {
+    const num = (x) => (/^\d{1,3}$/.test(String(x || "").trim()) ? Number(x) : null);
+    const spiel = num(v.spiel), heim = num(v.heim), gast = num(v.gast);
+    if (spiel == null || heim == null || gast == null) return eph("Bitte Spiel-Nr. und beide Torzahlen als Zahl eintragen.");
+    const opt = [{ name: "spiel", value: spiel }, { name: "heim", value: heim }, { name: "gast", value: gast }, ...(v.elfmeter?.trim() ? [{ name: "elfmeter", value: v.elfmeter.trim() }] : [])];
+    return admin(asCmd(i, ch, "cup-admin", "ergebnis", opt), context, cfg);
+  }
+  if (id === "admm:ea") return admin(asCmd(i, ch, "cup-admin", "ea-verknüpfen", [{ name: "verein", value: v.team }, ...(v.ea_id?.trim() ? [{ name: "ea_id", value: v.ea_id.trim() }] : [])]), context, cfg);
+  return eph("Unbekanntes Formular.");
+}
+
 // ---------- Slash-Befehle ----------
 async function command(i, context) {
   const cfg = await getConfig();
@@ -228,7 +300,7 @@ async function setup(i, context, cfg) {
     });
   }
   if (sub.name === "panels") {
-    return background(i, context, async () => { await F.refreshRulesPanel(); await F.refreshRolesPanel(); await F.refreshRegPanel(); await F.refreshTeamPanel(); await F.refreshOverview(); await B.refreshBanPanel(); await SUP.refreshTicketPanel(); await SUP.refreshApplyPanel(); await SH.refreshShopPanel(); return "✅ Panels in Regelwerk, Rollenauswahl, Team-registrieren, Meine-Mannschaft, Mannschaftsübersicht, Sperrliste, Support und Staff-Bewerbung gepostet bzw. aktualisiert."; });
+    return background(i, context, async () => { await F.refreshRulesPanel(); await F.refreshRolesPanel(); await F.refreshRegPanel(); await F.refreshTeamPanel(); await F.refreshOverview(); await B.refreshBanPanel(); await SUP.refreshTicketPanel(); await SUP.refreshApplyPanel(); await F.refreshAdminPanel(); await SH.refreshShopPanel(); return "✅ Panels in Regelwerk, Rollenauswahl, Team-registrieren, Meine-Mannschaft, Mannschaftsübersicht, Sperrliste, Support und Staff-Bewerbung gepostet bzw. aktualisiert."; });
   }
   if (sub.name === "status") return background(i, context, async () => {
     // Prüfen, ob die verknüpften Kanäle noch existieren (gelöschte Kanäle erscheinen in Discord als „#unbekannt“)
@@ -454,6 +526,7 @@ async function resultOpen(i) {
 async function component(i, context) {
   const cfg = await getConfig();
   const id = i.data.custom_id, uid = uidOf(i);
+  if (id.startsWith("adm:")) return adminPanelClick(i, context, cfg);
 
   // --- Shop ---
   if (id.startsWith("shop_")) return shopComponent(i, context, id, uid);
@@ -693,6 +766,7 @@ async function component(i, context) {
 async function modal(i, context) {
   const cfg = await getConfig();
   const id = i.data.custom_id, uid = uidOf(i), v = modalValues(i);
+  if (id.startsWith("admm:")) return adminPanelModal(i, context, cfg, v);
 
   if (id === "reg_new") {
     if (!hasRole(i, cfg.roles.manager)) return reply(i, { content: "Nur Mitglieder mit der Rolle **Manager** können registrieren.", components: [] });

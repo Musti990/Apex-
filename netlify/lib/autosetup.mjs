@@ -51,6 +51,7 @@ const PLAN = [
   ]),
   { key: "support", name: "🎫・" + fancy("Support"), cat: "support", prof: "members" },
   { key: "bewerbung", name: "💼・" + fancy("Staff-Bewerbung"), cat: "support", prof: "members" },
+  { key: "adminpanel", name: "🛠️・" + fancy("Admin-Panel"), cat: "staff", prof: "admins" },
   { key: "admin", name: "⚙️・" + fancy("Admin"), cat: "staff", prof: "admins" },
   { key: "eaabort", name: "🚨・" + fancy("EA-Abbrueche"), cat: "staff", prof: "staff" },
   { key: "eastatus", name: "📡・" + fancy("EA-Status"), cat: "staff", prof: "staff" },
@@ -69,7 +70,7 @@ export function detectKey(rawName) {
   if (n.includes("kophase")) return "ko";
   const day = DAYS.findIndex((d) => n === d.toLowerCase());
   if (day >= 0) return "day" + (day + 1);
-  const map = [["teamstatistiken", "teamstats"], ["eastatus", "eastatus"], ["eaabbrueche", "eaabort"], ["anmeldung", "signup"], ["staffbewerbung", "bewerbung"], ["bewerbung", "bewerbung"], ["support", "support"], ["teamofthetournament", "tott"], ["tott", "tott"], ["willkommen", "welcome"], ["rollenauswahl", "roles"], ["benachrichtigung", "notify"], ["regelwerk", "rules"], ["registrieren", "reg"], ["meinemannschaft", "team"], ["mannschaftsuebersicht", "over"], ["livespielplan", "live"], ["halloffame", "hof"], ["sperrliste", "ban"], ["turnierleitung", "log"]];
+  const map = [["adminpanel", "adminpanel"], ["teamstatistiken", "teamstats"], ["eastatus", "eastatus"], ["eaabbrueche", "eaabort"], ["anmeldung", "signup"], ["staffbewerbung", "bewerbung"], ["bewerbung", "bewerbung"], ["support", "support"], ["teamofthetournament", "tott"], ["tott", "tott"], ["willkommen", "welcome"], ["rollenauswahl", "roles"], ["benachrichtigung", "notify"], ["regelwerk", "rules"], ["registrieren", "reg"], ["meinemannschaft", "team"], ["mannschaftsuebersicht", "over"], ["livespielplan", "live"], ["halloffame", "hof"], ["sperrliste", "ban"], ["turnierleitung", "log"]];
   for (const [kw, key] of map) if (n.includes(kw)) return key;
   if (n === "regeln") return "rules";
   if (n === "admin") return "admin";
@@ -202,7 +203,7 @@ export async function processSetupJobs(budgetMs = 8000) {
     if (job.k === "panels") {
       await refreshRulesPanel(); await refreshRolesPanel(); await refreshRegPanel(); await refreshTeamPanel(); await refreshOverview(); await refreshBanPanel();
       { const S = await import("./support.mjs"); await S.refreshTicketPanel(); await S.refreshApplyPanel(); }
-      await (await import("./trophies.mjs")).refreshTrophyPanel();
+      await (await import("./flow.mjs")).refreshAdminPanel();
     }
     await mutate("setupjobs", (x) => {
       const j = x.list[0];
