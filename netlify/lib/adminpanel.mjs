@@ -19,7 +19,7 @@ export function adminPanel(t) {
         statusLine,
         "",
         "**🏆 Cup** – Neuer Cup · Anmeldeschluss · Check-in beenden · Abbrechen",
-        "**👥 Teams** – Team hinzufügen · abmelden · Freilos + / −",
+        "**👥 Teams** – Team hinzufügen · abmelden · Freilos + / − · Team auflösen",
         "**⚽ Spiele** – offene Spiele · Ergebnis festlegen · EA verknüpfen · TOTT posten",
         "**🚫 Sperren** – sperren · Sperre aufheben",
         "**🧪 Test & Pflege** – Test-Cup · Test-Spiele ausspielen · Panels · Rechte · Status",
@@ -28,7 +28,7 @@ export function adminPanel(t) {
     }],
     components: [
       row(b("Neuer Cup", "adm:new", "🆕", 3, !!t && ["anmeldung", "checkin", "gruppen", "ko"].includes(st)), b("Anmeldeschluss", "adm:close", "⏩", 1, st !== "anmeldung"), b("Check-in beenden", "adm:ciend", "✅", 1, st !== "checkin"), b("Cup abbrechen", "adm:cancel", "🛑", 4, !t || st === "fertig")),
-      row(b("Team hinzufügen", "adm:add", "➕", 2), b("Team abmelden", "adm:rem", "➖", 2), b("Freilos +", "adm:fl+", "🎟️", 2), b("Freilos −", "adm:fl-", "🎟️", 2)),
+      row(b("Team hinzufügen", "adm:add", "➕", 2), b("Team abmelden", "adm:rem", "➖", 2), b("Freilos +", "adm:fl+", "🎟️", 2), b("Freilos −", "adm:fl-", "🎟️", 2), b("Team auflösen", "adm:del", "🗑️", 4)),
       row(b("Offene Spiele", "adm:games", "📋", 2), b("Ergebnis festlegen", "adm:result", "✏️", 1), b("EA verknüpfen", "adm:ea", "🔗", 2), b("TOTT posten", "adm:tott", "⭐", 2)),
       row(b("Sperren", "ban_start", "🚫", 4), b("Sperre aufheben", "ban_lift", "🔓", 2), b("Test-Cup", "adm:test", "🧪", 2), b("Test-Spiele ausspielen", "adm:testgo", "▶️", 2)),
       row(b("Panels aktualisieren", "adm:panels", "🔄", 2), b("Rechte setzen", "adm:perms", "🔐", 2), b("Status", "adm:status", "📊", 2), b("Panel neu laden", "adm:refresh", "♻️", 2)),
@@ -51,6 +51,11 @@ export const eaModal = () => modal("admm:ea", "EA-Club verknüpfen", [
   { custom_id: "team", label: "Teamname (genau wie in der Übersicht)", max_length: 30 },
   { custom_id: "ea_id", label: "EA-Club-ID (leer = per Name suchen)", max_length: 12, req: false },
 ]);
+export const delTeamModal = () => modal("admm:del", "Team auflösen", [
+  { custom_id: "team", label: "Teamname (genau wie in der Übersicht)", max_length: 30 },
+  { custom_id: "grund", label: "Grund (wird dem Manager geschickt)", max_length: 200, req: false, placeholder: "z. B. inaktiv, Regelverstoß …" },
+]);
+
 /** Auswahl eines Teams (für hinzufügen/abmelden) */
 export function teamPick(id, names, placeholder) {
   if (!names.length) return { content: "Keine passenden Teams.", components: [] };

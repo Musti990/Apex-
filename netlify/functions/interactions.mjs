@@ -163,6 +163,33 @@ async function setTeamEa(team, ea) {
   return { content: `✅ EA-Club verknüpft: **${V.esc(ea.name || "?")}**.`, embeds: [], components: [] };
 }
 
+// ---------- Team auflösen ----------
+function delTeamConfirm(name, reason) {
+  if (!name) return eph("Kein Team gewählt.");
+  const cid = `adm:delok:${encodeURIComponent(name)}`.slice(0, 100);
+  return eph(`⚠️ **${V.esc(name)} wirklich auflösen?**\nManager und Co-VMs verlieren das Team, Spitznamen werden zurückgesetzt, Logo und EA-Verknüpfung gelöscht. Ist das Team in einer laufenden Anmeldung, wird es abgemeldet.${reason ? `\nGrund: ${reason}` : ""}`, { components: [{ type: 1, components: [{ type: 2, style: 2, label: "Nein", custom_id: "adm:nop" }, { type: 2, style: 4, label: "Ja, auflösen", custom_id: cid }] }] });
+}
+async function dissolveTeam(name, reason, by) {
+  const clubs = await getClubs(), c = clubs[name];
+  if (!c) return "Dieses Team gibt es nicht mehr.";
+  // aus laufender Anmeldung / Check-in streichen (laufende Spiele bleiben unberührt)
+  const t = await F.currentCup();
+  if (t && ["anmeldung", "checkin"].includes(t.status) && t.reg.includes(name)) {
+    const { value } = await mutate(tKey(t.channelId), (x) => { x.reg = x.reg.filter((n) => n !== name); x.checked = (x.checked || []).filter((n) => n !== name); });
+    await F.refreshSignup(value).catch(() => {});
+  }
+  await F.releaseClub(name, { reason: reason || "Von der Turnierleitung aufgelöst" });
+  await del(`logo:${name}`).catch(() => {});
+  await F.refreshOverview().catch(() => {});
+  // Manager per DM informieren (klappt nicht, wenn er DMs gesperrt hat – dann einfach weiter)
+  try {
+    const { discord } = await import("../lib/discord.mjs");
+    const dmc = await discord("/users/@me/channels", "POST", { recipient_id: c.manager });
+    if (dmc?.id) await discord(`/channels/${dmc.id}/messages`, "POST", { content: `🗑️ Dein Team **${name}** wurde von der Turnierleitung der Apex Arena aufgelöst.${reason ? `\nGrund: ${reason}` : ""}\nDu kannst jederzeit ein neues Team registrieren.` });
+  } catch { /* egal */ }
+  return `🗑️ **${V.esc(name)}** wurde aufgelöst.${reason ? ` Grund: ${reason}` : ""}`;
+}
+
 // ---------- ⚙️ Admin-Panel ----------
 /** Kanal des aktuellen Cups (laufend, sonst Anmelde-Kanal) */
 async function cupChannel(cfg) { const t = await F.currentCup(); return t?.channelId || cfg.channels.signup || null; }
@@ -171,8 +198,9 @@ const asCmd = (i, ch, name, sub, options = []) => ({ ...i, channel_id: ch || i.c
 
 async function adminPanelClick(i, context, cfg) {
   if (!isAdmin(i, cfg)) return eph("Das Admin-Panel darf nur die **Turnierleitung** benutzen.");
-  const id = i.data.custom_id, ch = await cupChannel(cfg);
+  let id = i.data.custom_id; const ch = await cupChannel(cfg);
   const run = (sub, options = []) => admin(asCmd(i, ch, "cup-admin", sub, options), context, cfg);
+  if (id.startsWith("adm:delok:")) { const enc = id.slice(10); id = "adm:delok"; i = { ...i, data: { ...i.data, custom_id: "adm:delok:" + enc } }; }
   switch (id) {
     case "adm:new": return AP.newCupModal();
     case "adm:close": return run("anmeldeschluss");
@@ -200,6 +228,17 @@ async function adminPanelClick(i, context, cfg) {
       return eph("", AP.teamPick("adm:rempick", t.reg.filter((n) => !/^freilos/i.test(n)), "**➖ Welches Team soll abgemeldet werden?**"));
     }
     case "adm:rempick": return admin(asCmd(i, ch, "cup-admin", "abmelden", [{ name: "verein", value: i.data.values?.[0] }]), context, cfg);
+    case "adm:del": {
+      const names = Object.keys(await getClubs()).sort((a, b) => a.localeCompare(b, "de"));
+      if (!names.length) return eph("Es gibt noch keine Teams.");
+      if (names.length > 25) return AP.delTeamModal(); // zu viele für eine Auswahl → Name eintippen
+      return eph("", AP.teamPick("adm:delpick", names, "**🗑️ Welches Team soll aufgelöst werden?**\n-# Manager und Co-VMs verlieren das Team, Logo und EA-Verknüpfung werden gelöscht."));
+    }
+    case "adm:delpick": return delTeamConfirm(i.data.values?.[0], "");
+    case "adm:delok": {
+      const enc = i.data.custom_id.slice("adm:delok:".length); // adm:delok:<Team>
+      return background(i, context, () => dissolveTeam(decodeURIComponent(enc || ""), i.message?.content?.match(/Grund: (.*)$/m)?.[1] || "", uidOf(i)), { update: true });
+    }
     case "adm:fl+": return run("freilos-hinzufügen");
     case "adm:fl-": return run("freilos-entfernen");
     case "adm:games": return run("spiele");
@@ -229,6 +268,11 @@ async function adminPanelModal(i, context, cfg, v) {
     if (spiel == null || heim == null || gast == null) return eph("Bitte Spiel-Nr. und beide Torzahlen als Zahl eintragen.");
     const opt = [{ name: "spiel", value: spiel }, { name: "heim", value: heim }, { name: "gast", value: gast }, ...(v.elfmeter?.trim() ? [{ name: "elfmeter", value: v.elfmeter.trim() }] : [])];
     return admin(asCmd(i, ch, "cup-admin", "ergebnis", opt), context, cfg);
+  }
+  if (id === "admm:del") {
+    const name = Object.keys(await getClubs()).find((c) => c.toLowerCase() === String(v.team || "").trim().toLowerCase());
+    if (!name) return eph("Dieses Team gibt es nicht – bitte genau wie in der Übersicht schreiben.");
+    return delTeamConfirm(name, String(v.grund || "").trim());
   }
   if (id === "admm:ea") return admin(asCmd(i, ch, "cup-admin", "ea-verknüpfen", [{ name: "verein", value: v.team }, ...(v.ea_id?.trim() ? [{ name: "ea_id", value: v.ea_id.trim() }] : [])]), context, cfg);
   return eph("Unbekanntes Formular.");
