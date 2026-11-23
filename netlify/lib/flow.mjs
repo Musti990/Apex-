@@ -57,6 +57,9 @@ export async function refreshAdminPanel() {
 /** Aktueller Cup: laufend, sonst die Anmeldung im Anmelde-Kanal, sonst der zuletzt beendete */
 export async function currentCup() {
   const cfg = await getConfig();
+  // ein laufender Test-Cup hat Vorrang (damit die Panel-Buttons ihn steuern)
+  const tc = await get("testcup");
+  if (tc) { const t = await get(tKey(tc)); if (t?.test && !["fertig", "abgesagt", "geloescht"].includes(t.status)) return t; }
   const act = await activeTournament();
   if (act) return act;
   const s = cfg.channels.signup ? await get(tKey(cfg.channels.signup)) : null;
@@ -681,14 +684,29 @@ export async function startTestCup(channelId, uid, size = 8) {
   if (virtual.length < size - (mine ? 1 : 0)) throw new Error("Nicht genug freie Vereine für einen Test-Cup.");
   await launchTournament({ channelId, name: "🧪 Test-Cup", times: timesFromKickoff(Date.now() + 3 * 3600000) }, { replace: true });
   const { value: t } = await mutate(tKey(channelId), (x) => { x.test = true; x.virtual = virtual; x.reg = [...(mine ? [mine.club] : []), ...virtual]; });
+  await set("testcup", channelId);
   await refreshSignup(t);
   return { mine, virtual };
 }
 
+/** Test-Cup in einem Rutsch bis zum Anpfiff bringen: Auslosung → alle einchecken → Spieltag 1 freigeben */
+export async function fastForwardTestCup(channelId) {
+  let t = await get(tKey(channelId));
+  if (!t?.test) throw new Error("Hier läuft kein Test-Cup.");
+  if (t.status === "anmeldung") { await doDraw(channelId); t = await get(tKey(channelId)); }
+  if (t.status === "checkin") {
+    await mutate(tKey(channelId), (x) => { for (const n of x.reg) if (!x.checked.includes(n)) T.checkIn(x, n); });
+    await doCheckinEnd(channelId);
+    t = await get(tKey(channelId));
+    if (t.status === "checkin" || (t.status === "gruppen" && !t.kickoffDone)) await doKickoff(channelId);
+  }
+  return await get(tKey(channelId));
+}
+
 /** Spiele zwischen zwei Test-Teams sofort mit Zufallsergebnis abschließen (auch über mehrere Runden). */
-export async function playVirtualMatches(channelId) {
+export async function playVirtualMatches(channelId, maxRounds = 12) {
   let played = 0;
-  for (let loop = 0; loop < 12; loop++) {
+  for (let loop = 0; loop < maxRounds; loop++) {
     const t0 = await get(tKey(channelId));
     if (!t0?.test || !["gruppen", "ko"].includes(t0.status)) break;
     const v = new Set(t0.virtual || []);

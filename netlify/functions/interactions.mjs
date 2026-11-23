@@ -245,8 +245,22 @@ async function adminPanelClick(i, context, cfg) {
     case "adm:result": return AP.resultModal();
     case "adm:ea": return AP.eaModal();
     case "adm:tott": return run("tott");
-    case "adm:test": return admin(asCmd(i, cfg.channels.adminpanel || cfg.channels.admin || i.channel_id, "cup-admin", "testcup-start", [{ name: "teams", value: 8 }]), context, cfg);
-    case "adm:testgo": return run("testcup-weiter");
+    case "adm:test": {
+      const tch = cfg.channels.adminpanel || cfg.channels.admin || i.channel_id;
+      return background(i, context, async () => {
+        const r = await F.startTestCup(tch, uidOf(i), 8);
+        const t = await F.fastForwardTestCup(tch);
+        return `🧪 **Test-Cup läuft!** 8 Teams, schon ausgelost und eingecheckt – **${t.status === "gruppen" ? `Spieltag ${t.round}` : t.status}** ist freigegeben.\n${r.mine ? `• Deine Mannschaft **${V.esc(r.mine.club)}** spielt mit – melde deine Spiele über die Knöpfe.` : "• Du hast kein eigenes Team – es spielen nur Test-Teams."}\n• **▶️ Test-Spiele ausspielen** spielt alle Test-Spiele sofort (Runde für Runde bis zum Finale).\n• Beenden: **🛑 Cup abbrechen**.\n-# Keine Statistik, kein TOTT, keine Trophäen.`;
+      });
+    }
+    case "adm:testgo": return background(i, context, async () => {
+      const t0 = await F.currentCup();
+      if (!t0?.test) return "Gerade läuft kein Test-Cup – erst **🧪 Test-Cup** klicken.";
+      if (["anmeldung", "checkin"].includes(t0.status)) await F.fastForwardTestCup(t0.channelId);
+      const n = await F.playVirtualMatches(t0.channelId, 2); // 2 Runden pro Klick (Netlify-Zeitlimit)
+      const t = await get(tKey(t0.channelId));
+      return t.status === "fertig" ? `🏆 Test-Cup beendet – Sieger: **${V.esc(t.podium?.[0] || "?")}**. Siegerbild & Turnierbaum stehen in den Kanälen.` : n ? `🧪 ${n} Test-Spiele gespielt – jetzt: **${t.status === "gruppen" ? `Spieltag ${t.round}` : "K.-o.-Phase"}**. Nochmal klicken für die nächste Runde.` : "🧪 Keine offenen Test-Spiele – jetzt bist du mit deinem Spiel dran (oder Ergebnis festlegen).";
+    });
     case "adm:panels": return setup(asCmd(i, i.channel_id, "cup-einrichten", "panels"), context, cfg);
     case "adm:perms": return setup(asCmd(i, i.channel_id, "cup-einrichten", "rechte"), context, cfg);
     case "adm:status": return setup(asCmd(i, i.channel_id, "cup-einrichten", "status"), context, cfg);
