@@ -86,7 +86,8 @@ function overwrites(prof, roles) {
   const seeRO = (id) => (id ? { id, type: 0, allow: bits(P.VIEW, P.HISTORY), deny: bits(P.SEND) } : null);
   const lead = see(roles.turnierleitung, P.SEND, P.FILES);
   // Eingang: Willkommen, Regelwerk, Rollenauswahl – sieht jeder, auch ohne Rolle
-  if (prof === "entry" || prof === "public") return [ro];
+  if (prof === "entry") return [ro];
+  if (prof === "public") prof = "members"; // Team-Statistiken usw. erst mit Rolle
   // Alles andere: erst mit Rolle Spieler oder Manager (Staff sieht immer mit)
   if (prof === "members") return [hide, seeRO(roles.spieler), seeRO(roles.manager), seeRO(roles.moderator), seeRO(roles.support), lead].filter(Boolean);
   if (prof === "managers") return [hide, seeRO(roles.manager), lead].filter(Boolean);
@@ -97,6 +98,26 @@ function overwrites(prof, roles) {
   if (prof === "ko") return [hide, see(roles.koPhase, P.SEND), ...ROUND_ROLES.map((r) => see(roles.rounds?.[r], P.SEND)), lead].filter(Boolean);
   if (prof === "kores") return [hide, see(roles.koPhase, P.SEND, P.FILES), ...ROUND_ROLES.map((r) => see(roles.rounds?.[r], P.SEND, P.FILES)), lead].filter(Boolean);
   return [];
+}
+
+/**
+ * Server abschließen: Ohne Rolle sieht man NUR Willkommen, Regelwerk und Rollenauswahl.
+ * @everyone verliert „Kanäle ansehen“ serverweit; Spieler, Manager und Staff bekommen es über ihre Rolle.
+ * So sind auch alle anderen Kanäle des Servers (nicht nur die vom Bot) erst mit Rolle sichtbar.
+ */
+export async function lockServer(roles) {
+  const all = (await discord(`/guilds/${G()}/roles`)) || [];
+  const byId = Object.fromEntries(all.map((r) => [r.id, r]));
+  const VIEW = 1n << 10n, HIST = 1n << 16n;
+  const res = { everyone: false, roles: [] };
+  const ev = byId[G()];
+  if (ev && (BigInt(ev.permissions) & VIEW)) { await discord(`/guilds/${G()}/roles/${G()}`, "PATCH", { permissions: String(BigInt(ev.permissions) & ~VIEW) }); res.everyone = true; }
+  for (const id of [roles.spieler, roles.manager, roles.turnierleitung, roles.moderator, roles.support].filter(Boolean)) {
+    const r = byId[id]; if (!r) continue;
+    const want = BigInt(r.permissions) | VIEW | HIST;
+    if (want !== BigInt(r.permissions)) { await discord(`/guilds/${G()}/roles/${id}`, "PATCH", { permissions: String(want) }); res.roles.push(r.name); }
+  }
+  return res;
 }
 
 /** Rollen verknüpfen bzw. anlegen */
@@ -143,7 +164,9 @@ export async function setupAll({ create = true, perms = true, kickoff = "20:00" 
   const ko = parseTime(kickoff) || "20:00";
   jobs.push({ k: "panels" });
   await mutate("setupjobs", (q) => { q.list = jobs; q.kickoff = ko; q.cats = {}; q.done = 0; q.total = jobs.length; }, { initial: {} });
-  return { roles, found, missing: create ? missing : [], perms, total: jobs.length };
+  let lock = null;
+  if (perms) lock = await lockServer(roles).catch((e) => ({ err: e.message }));
+  return { roles, found, missing: create ? missing : [], perms, total: jobs.length, lock };
 }
 
 /** Alle Kanalnamen des Servers in die fette Schrift umstellen (Kategorien und Ticket-Kanäle bleiben) */

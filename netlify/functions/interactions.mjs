@@ -1,6 +1,6 @@
 import nacl from "tweetnacl";
 import { coList, coIds, addCo, removeCo, MAX_CO } from "../lib/co.mjs";
-import { get, set, mutate, getConfig, getClubs, tKey } from "../lib/store.mjs";
+import { get, set, del, mutate, getConfig, getClubs, tKey } from "../lib/store.mjs";
 import { editOriginal, discord, sendMessage } from "../lib/discord.mjs";
 import { enqueue, processQueue } from "../lib/roles.mjs";
 import * as T from "../lib/tournament.mjs";
@@ -26,7 +26,7 @@ const isEphemeralMsg = (i) => ((i.message?.flags ?? 0) & 64) === 64;
 /** Antwort auf einen Button: im eigenen Fenster aktualisieren, sonst neues privates Fenster */
 const reply = (i, payload) => (isEphemeralMsg(i) ? { type: 7, data: { allowed_mentions: { parse: [] }, ...payload } } : { type: 4, data: { flags: 64, allowed_mentions: { parse: [] }, ...payload } });
 const opts = (list = []) => Object.fromEntries(list.map((x) => [x.name, x.value]));
-function modalValues(i) { const o = {}; for (const r of i.data.components ?? []) { const c = r.components?.[0] ?? r.component; if (c?.custom_id) o[c.custom_id] = c.value ?? ""; } return o; }
+function modalValues(i) { const o = {}; for (const r of i.data.components ?? []) { const c = r.components?.[0] ?? r.component; if (c?.custom_id) o[c.custom_id] = c.value ?? (Array.isArray(c.values) ? c.values : ""); } return o; }
 
 const hasRole = (i, id) => !!id && (i.member?.roles ?? []).includes(id);
 function isAdmin(i, cfg) {
@@ -138,6 +138,31 @@ async function uploadLogo(i, context) {
   });
 }
 
+// ---------- Team anlegen / EA setzen ----------
+async function createTeam(i, uid, name, ea, logo, eaGuess = "") {
+  const cfg = await getConfig();
+  const v0 = Date.now().toString(36);
+  const { result } = await mutate("clubs", (cl) => {
+    if (F.clubOfUser(cl, uid)) return "schon";
+    if (Object.keys(cl).some((k) => k.toLowerCase() === name.toLowerCase())) return "vergeben";
+    if (ea && Object.values(cl).some((c) => String(c.eaId) === String(ea.id))) return "eavergeben";
+    cl[name] = { manager: uid, cos: [], ea: ea?.name || eaGuess, eaId: ea?.id || null, eaName: ea?.name || null, eaVerified: !!ea, eaLookup: { at: Date.now(), ok: !!ea }, since: Date.now(), lastPlayed: todayKey(), cups: 0, titles: 0, managerBase: baseNameOf(i.member), managerOrigNick: i.member?.nick ?? null, custom: true, ...(logo ? { logoV: v0 } : {}) };
+    return "ok";
+  }, { initial: {} });
+  if (result === "vergeben") return `Den Namen **${V.esc(name)}** gibt es schon – bitte einen anderen wählen.`;
+  if (result === "schon") return "Du hast bereits eine Mannschaft.";
+  if (result === "eavergeben") return "Dieser EA-Club ist schon bei einem anderen Team eingetragen.";
+  if (logo) await set(`logo:${name}`, { ...logo, v: v0 });
+  await setNick(uid, nickFor(baseNameOf(i.member), "manager", name));
+  await F.refreshRegPanel(); await F.refreshOverview();
+  return { content: `🛡️ **Willkommen, Manager von ${V.esc(name)}!**\n🔗 EA-Club: ${ea ? `**${V.esc(ea.name || "?")}** ✅ verknüpft` : `⚠️ EA war gerade nicht erreichbar – später unter *Meine Mannschaft → EA-Club ändern* verknüpfen`}\n${logo ? "🖼️ Logo gespeichert" : "🖼️ Kein Logo – nachholen mit `/cup-logo bild:`"}\nDeine Mannschaft findest du in ${cfg.channels.team ? `<#${cfg.channels.team}>` : "Meine-Mannschaft"}.`, embeds: logo ? [{ color: COLOR, title: name, thumbnail: { url: V.logoUrl(name, v0) } }] : [], components: [] };
+}
+async function setTeamEa(team, ea) {
+  await mutate("clubs", (cl) => { const x = cl[team]; if (x) Object.assign(x, { eaId: ea.id, ea: ea.name || x.ea, eaName: ea.name || null, eaVerified: true, eaLookup: { at: Date.now(), ok: true } }); }, { initial: {} });
+  await F.refreshOverview().catch(() => {});
+  return { content: `✅ EA-Club verknüpft: **${V.esc(ea.name || "?")}**.`, embeds: [], components: [] };
+}
+
 // ---------- ⚙️ Admin-Panel ----------
 /** Kanal des aktuellen Cups (laufend, sonst Anmelde-Kanal) */
 async function cupChannel(cfg) { const t = await F.currentCup(); return t?.channelId || cfg.channels.signup || null; }
@@ -240,7 +265,7 @@ async function setup(i, context, cfg) {
     return background(i, context, async () => {
       const n = await AS.setupRename();
       if (!n) return "✅ Alle Kanäle stehen schon in der fetten Schrift.";
-      await AS.processSetupJobs(14000);
+      await AS.processSetupJobs(5000); // kurz halten: Netlify beendet Funktionen nach ca. 10 s – der Rest läuft im Minuten-Timer weiter
       const pr = await AS.setupProgress();
       return `🔤 **${n} Kanäle werden umbenannt** (z. B. 𝐊𝐎-𝐄𝐫𝐠𝐞𝐛𝐧𝐢𝐬𝐬𝐞).\n${pr?.left ? `⏳ Noch ${pr.left} offen – läuft im Hintergrund weiter (etwa ${Math.ceil(pr.left / 8)} Min.).` : "✅ Fertig."}\n-# Verknüpfungen bleiben erhalten. Kategorien und Ticket-Kanäle werden nicht angefasst. Umlaute werden zu ae/oe/ue.`;
     });
@@ -249,15 +274,17 @@ async function setup(i, context, cfg) {
     return background(i, context, async () => {
       const n = await AS.setupPerms();
       if (!n) return "Es sind noch keine Kanäle verknüpft.";
-      await AS.processSetupJobs(14000);
+      const cfgNow = await getConfig();
+      const lock = await AS.lockServer(cfgNow.roles || {}).catch((e) => ({ err: e.message }));
+      await AS.processSetupJobs(5000); // kurz halten: Netlify beendet Funktionen nach ca. 10 s – der Rest läuft im Minuten-Timer weiter
       const pr = await AS.setupProgress();
-      return `🔒 **Rechte für ${n} Kanäle werden gesetzt.**\n• Willkommen, Regelwerk, Rollenauswahl: für **alle** sichtbar\n• Alle anderen Bot-Kanäle: erst mit Rolle **Spieler** oder **Manager** (Staff sieht alles)\n${pr?.left ? `⏳ Noch ${pr.left} offen – läuft im Hintergrund weiter (ca. 1 Minute).` : "✅ Fertig."}\n-# Deine eigenen Kanäle (z. B. Community) stellst du am besten über die Kategorie ein.`;
+      return `🔒 **Rechte für ${n} Kanäle werden gesetzt.**\n• Willkommen, Regelwerk, Rollenauswahl: für **alle** sichtbar\n• **Alle anderen Kanäle des Servers:** erst mit Rolle **Spieler** oder **Manager** (Staff sieht alles)\n${lock?.err ? `⚠️ Server-Sperre fehlgeschlagen (${lock.err}) – Bot-Rolle ganz nach oben ziehen.\n` : "🔒 @everyone sieht ohne Rolle keine anderen Kanäle mehr.\n"}${pr?.left ? `⏳ Noch ${pr.left} offen – läuft im Hintergrund weiter (ca. 1 Minute).` : "✅ Fertig."}\n-# Ausnahme: Kanäle, bei denen @everyone ausdrücklich „Kanal ansehen ✅“ hat – dort das Häkchen entfernen.`;
     });
   }
   if (sub.name === "alles") {
     return background(i, context, async () => {
       const r = await AS.setupAll({ create: o.fehlende_erstellen ?? true, perms: o.rechte_setzen ?? true, kickoff: o.anpfiff ?? "20:00" });
-      await AS.processSetupJobs(14000);
+      await AS.processSetupJobs(5000); // kurz halten: Netlify beendet Funktionen nach ca. 10 s – der Rest läuft im Minuten-Timer weiter
       const pr = await AS.setupProgress();
       const name = (k) => (k.startsWith("day") ? DAYS[Number(k.slice(3)) - 1] : CHANNEL_TYPES[k] || k);
       const found = Object.keys(r.found);
@@ -265,6 +292,7 @@ async function setup(i, context, cfg) {
         "✅ **Einrichtung gestartet**",
         `👥 Rollen verknüpft bzw. angelegt.`,
         `🔎 **${found.length} Kanäle erkannt:** ${found.map(name).join(", ") || "–"}`,
+        r.lock && !r.lock.err ? "🔒 **Server abgeschlossen:** ohne Rolle sieht man nur Willkommen, Regelwerk und Rollenauswahl – mit **Spieler** oder **Manager** alles andere." : r.lock?.err ? `⚠️ Server konnte nicht abgeschlossen werden (${r.lock.err}) – Bot-Rolle nach oben ziehen und \`/cup-einrichten rechte\` nochmal.` : "",
         r.missing.length ? `🆕 **${r.missing.length} Kanäle werden angelegt:** ${r.missing.map((m) => name(m.key)).join(", ")}` : "🆕 Keine fehlenden Kanäle.",
         r.perms ? "🔒 Rechte werden gesetzt (wer welchen Kanal sieht)." : "🔒 Rechte nicht verändert.",
         "",
@@ -527,6 +555,29 @@ async function component(i, context) {
   const cfg = await getConfig();
   const id = i.data.custom_id, uid = uidOf(i);
   if (id.startsWith("adm:")) return adminPanelClick(i, context, cfg);
+  if (id === "rules_edit" || id === "rules_edsel") {
+    if (!isAdmin(i, cfg)) return eph("Das Regelwerk darf nur die **Turnierleitung** bearbeiten.");
+    const R = await F.rulesText();
+    if (id === "rules_edit") return eph("", V.rulesEditMenu(R));
+    const which = i.data.values?.[0];
+    if (which === "reaccept") return background(i, context, async () => { await F.saveRulesText((r) => { r.version = (r.version || 0) + 1; }); await F.refreshRulesPanel(); return "🔁 Erledigt – **alle Mitglieder müssen das Regelwerk neu akzeptieren**, bevor sie sich wieder anmelden können."; }, { update: true });
+    if (which === "reset") return background(i, context, async () => { const v = (await F.rulesText()).version || 0; await del("rulestext"); if (v) await set("rulestext", { ...(await F.rulesText()), version: v }); await F.refreshRulesPanel(); return "↩️ Standard-Regelwerk wiederhergestellt."; }, { update: true });
+    return V.rulesEditModal(which, R);
+  }
+  if (id === "reg_eapick" || id === "team_eapick") {
+    const eaId = i.data.values?.[0];
+    const opt = i.message?.components?.[0]?.components?.[0]?.options?.find((o) => o.value === eaId);
+    const ea = { id: eaId, name: opt?.label || null };
+    return background(i, context, async () => {
+      const clubs = await getClubs();
+      if (Object.values(clubs).some((c) => String(c.eaId) === String(eaId))) return "Dieser EA-Club ist schon bei einem anderen Team eingetragen.";
+      if (id === "team_eapick") { const mine = F.clubOfUser(clubs, uid); if (!mine) return "Du bist keiner Mannschaft zugeordnet."; return setTeamEa(mine.club, ea); }
+      const d = await get(`regdraft:${uid}`);
+      if (!d) return "Die Registrierung ist abgelaufen – bitte nochmal auf *Mannschaft registrieren* klicken.";
+      await del(`regdraft:${uid}`).catch(() => {});
+      return createTeam(i, uid, d.name, ea, d.logo);
+    }, { update: true });
+  }
 
   // --- Shop ---
   if (id.startsWith("shop_")) return shopComponent(i, context, id, uid);
@@ -621,7 +672,7 @@ async function component(i, context) {
     if (!mine) return reply(i, { content: hasRole(i, cfg.roles.manager) ? "Du hast noch keine Mannschaft – registriere dich in Team-registrieren." : "Das können nur Mitglieder mit der Rolle **Manager**.", embeds: [], components: [] });
     const detail = (c, note) => ({ ...V.teamDetail(c.club, c.data, c.role, daysBetween(SH.lastActiveKey(c.data, todayKey), todayKey())), content: note || "" });
     if (id === "team_open") return reply(i, detail(mine));
-    if (id === "team_ea") return V.eaIdModal("team_ea_m", "EA-Club-ID ändern", mine.data.eaId || "");
+    if (id === "team_ea") return V.eaIdModal("team_ea_m", "EA-Club ändern", mine.data.eaName || mine.data.ea || "");
     if (mine.role === "co") {
       if (id === "team_co_quit") {
         const orig = coList(mine.data).find((x) => x.id === uid)?.orig ?? null;
@@ -767,35 +818,52 @@ async function modal(i, context) {
   const cfg = await getConfig();
   const id = i.data.custom_id, uid = uidOf(i), v = modalValues(i);
   if (id.startsWith("admm:")) return adminPanelModal(i, context, cfg, v);
+  if (id.startsWith("rules_ed:")) {
+    if (!isAdmin(i, cfg)) return eph("Nur für die Turnierleitung.");
+    const which = id.split(":")[1], t = String(v.t || "").trim(), x = String(v.x || "").trim();
+    let msg = "✅ Regelwerk gespeichert.";
+    await F.saveRulesText((r) => {
+      if (which === "title") r.title = t || r.title;
+      else if (which === "hl") { r.highlight = t || x ? { title: t, text: x } : null; if (!r.highlight) msg = "✅ Roter Hinweis-Kasten entfernt."; }
+      else if (which === "new") r.sections.push([t, x]);
+      else { const k = Number(which.slice(1)); if (!t && !x) { r.sections.splice(k, 1); msg = "🗑️ Abschnitt gelöscht."; } else r.sections[k] = [t || "\u200b", x || "\u200b"]; }
+    });
+    later(context, () => F.refreshRulesPanel());
+    return eph(msg + "\n-# Sollen alle neu bestätigen? → *Bearbeiten* → **Alle müssen neu akzeptieren**.");
+  }
 
   if (id === "reg_new") {
     if (!hasRole(i, cfg.roles.manager)) return reply(i, { content: "Nur Mitglieder mit der Rolle **Manager** können registrieren.", components: [] });
     const name = String(v.name || "").replace(/\s+/g, " ").trim();
-    const eaId = String(v.eaid || "").replace(/\D/g, "");
+    const eaName = String(v.ea || "").trim();
     if (name.length < 3) return eph("Der Teamname braucht mindestens 3 Zeichen.");
     if (/^freilos/i.test(name) || /[<>@#`*_~|]/.test(name)) return eph("Dieser Teamname ist nicht erlaubt (keine Sonderzeichen wie @ # * < >).");
-    if (eaId.length < 3) return eph("Bitte die **EA-Club-ID** eintragen – nur Zahlen, z. B. `1234567`.");
+    if (eaName.length < 2) return eph("Bitte den **EA-Clubnamen** eintragen – genau wie in EA FC.");
     const clubs0 = await getClubs();
     if (F.clubOfUser(clubs0, uid)) return eph("Du hast bereits eine Mannschaft.");
     if (Object.keys(clubs0).some((k) => k.toLowerCase() === name.toLowerCase())) return eph(`Den Namen **${V.esc(name)}** gibt es schon – bitte einen anderen wählen.`);
-    const dup = Object.entries(clubs0).find(([, c]) => String(c.eaId) === eaId);
-    if (dup) return eph(`Die EA-Club-ID **${eaId}** ist schon bei **${V.esc(dup[0])}** eingetragen.`);
+    const att = i.data.resolved?.attachments?.[(Array.isArray(v.logo) ? v.logo : [])[0]];
+    if (att && !/^image\/(png|jpe?g|webp)$/.test(att.content_type || "")) return eph("Das Logo muss ein **PNG**, **JPG** oder **WEBP** sein.");
+    if (att && att.size > 2 * 1024 * 1024) return eph("Das Logo ist zu groß – maximal **2 MB**.");
     return background(i, context, async () => {
-      // EA-Club-ID bei EA prüfen
-      let ea = null, eaDown = false;
-      try { ea = await EA.clubById(eaId); } catch { eaDown = true; }
-      if (!ea && !eaDown) return `❌ Unter der EA-Club-ID **${eaId}** hat EA keinen Club gefunden. Bitte die ID prüfen und nochmal registrieren.`;
-      const { result } = await mutate("clubs", (cl) => {
-        if (F.clubOfUser(cl, uid)) return "schon";
-        if (Object.keys(cl).some((k) => k.toLowerCase() === name.toLowerCase())) return "vergeben";
-        cl[name] = { manager: uid, cos: [], ea: ea?.name || "", eaId, eaName: ea?.name || null, eaVerified: !!ea, eaLookup: { at: Date.now(), ok: !!ea, manual: true }, since: Date.now(), lastPlayed: todayKey(), cups: 0, titles: 0, managerBase: baseNameOf(i.member), managerOrigNick: i.member?.nick ?? null, custom: true };
-        return "ok";
-      }, { initial: {} });
-      if (result === "vergeben") return `Den Namen **${V.esc(name)}** gibt es schon – bitte einen anderen wählen.`;
-      if (result === "schon") return "Du hast bereits eine Mannschaft.";
-      await setNick(uid, nickFor(baseNameOf(i.member), "manager", name));
-      await F.refreshRegPanel(); await F.refreshOverview();
-      return `🛡️ **Willkommen, Manager von ${V.esc(name)}!**\n🔗 EA-Club: ${ea ? `**${V.esc(ea.name)}** (ID ${eaId}) ✅` : `ID ${eaId} – EA war gerade nicht erreichbar, ID trotzdem gespeichert`}\nDeine Mannschaft findest du in ${cfg.channels.team ? `<#${cfg.channels.team}>` : "Meine-Mannschaft"}.\n🖼️ Logo hochladen: \`/cup-logo bild:\` (PNG oder JPG, max. 2 MB)`;
+      // Logo gleich sichern (Discord-Links laufen ab)
+      let logo = null;
+      if (att) { const r = await fetch(att.url).catch(() => null); if (r?.ok) logo = { type: att.content_type, b64: Buffer.from(await r.arrayBuffer()).toString("base64") }; }
+      // EA-Club per Name suchen
+      let res = null;
+      try { res = await EA.searchClubs(eaName); } catch { res = null; }
+      const taken = new Set(Object.values(await getClubs()).map((c) => String(c.eaId || "")));
+      const pick = (l) => l.filter((c) => !taken.has(c.id));
+      if (res) {
+        const exact = pick(res.exact), all = pick(res.list);
+        if (exact.length === 1 || (!exact.length && all.length === 1)) return createTeam(i, uid, name, exact[0] || all[0], logo);
+        if (!all.length) return `❌ EA hat keinen freien Club **${V.esc(eaName)}** gefunden. Bitte den Namen **genau wie in EA FC** schreiben (Groß/Klein egal) und nochmal registrieren.`;
+        // mehrere Treffer → auswählen lassen
+        await set(`regdraft:${uid}`, { name, logo, at: Date.now() });
+        return V.eaPick("reg_eapick", exact.length ? exact : all, `🔎 EA hat **${(exact.length ? exact : all).length}** Clubs zu „${V.esc(eaName)}“ gefunden. **Welcher ist deiner?**`);
+      }
+      // EA nicht erreichbar → Team trotzdem anlegen, ohne Verknüpfung
+      return createTeam(i, uid, name, null, logo, eaName);
     });
   }
 
@@ -842,19 +910,17 @@ async function modal(i, context) {
   }
 
   if (id === "team_ea_m") {
-    const eaId = String(v.eaid || "").replace(/\D/g, "");
-    if (eaId.length < 3) return eph("Bitte die **EA-Club-ID** eintragen – nur Zahlen.");
+    const eaName = String(v.ea || "").trim();
+    if (eaName.length < 2) return eph("Bitte den **EA-Clubnamen** eintragen.");
     const clubs = await getClubs(), mine = F.clubOfUser(clubs, uid);
     if (!mine) return eph("Du bist keiner Mannschaft zugeordnet.");
-    const dup = Object.entries(clubs).find(([n, c]) => n !== mine.club && String(c.eaId) === eaId);
-    if (dup) return eph(`Die EA-Club-ID **${eaId}** ist schon bei **${V.esc(dup[0])}** eingetragen.`);
     return background(i, context, async () => {
-      let ea = null, eaDown = false;
-      try { ea = await EA.clubById(eaId); } catch { eaDown = true; }
-      if (!ea && !eaDown) return `❌ Unter der EA-Club-ID **${eaId}** hat EA keinen Club gefunden – nichts geändert.`;
-      await mutate("clubs", (cl) => { const x = cl[mine.club]; if (x) Object.assign(x, { eaId, ea: ea?.name || x.ea, eaName: ea?.name || null, eaVerified: !!ea, eaLookup: { at: Date.now(), ok: !!ea, manual: true } }); }, { initial: {} });
-      await F.refreshOverview().catch(() => {});
-      return `✅ EA-Club-ID gespeichert: ${ea ? `**${V.esc(ea.name)}** (ID ${eaId})` : `ID ${eaId} (EA gerade nicht erreichbar – trotzdem gespeichert)`}.`;
+      let res = null; try { res = await EA.searchClubs(eaName); } catch { return "⚠️ EA ist gerade nicht erreichbar – bitte später nochmal versuchen."; }
+      const taken = new Set(Object.entries(await getClubs()).filter(([n]) => n !== mine.club).map(([, c]) => String(c.eaId || "")));
+      const exact = res.exact.filter((c) => !taken.has(c.id)), all = res.list.filter((c) => !taken.has(c.id));
+      if (exact.length === 1 || (!exact.length && all.length === 1)) return setTeamEa(mine.club, exact[0] || all[0]);
+      if (!all.length) return `❌ EA hat keinen freien Club **${V.esc(eaName)}** gefunden – nichts geändert.`;
+      return V.eaPick("team_eapick", exact.length ? exact : all, `🔎 Mehrere Clubs zu „${V.esc(eaName)}“ gefunden. **Welcher ist deiner?**`);
     });
   }
 

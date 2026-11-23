@@ -15,7 +15,7 @@ export default async () => {
   let members = null;
   await step("Mitglieder laden", async () => { members = await listMembers(); });
   await step("Willkommen", () => welcomeNewMembers(members));
-  await step("Einrichtung", () => processSetupJobs(9000));
+  await step("Einrichtung", () => processSetupJobs(18000)); // geplante Funktionen dürfen länger laufen (bis 30 s)
   await step("Wochenplan", () => runSchedule());
   await step("Turniere", async () => {
     for (const t of await allTournaments()) if (["anmeldung", "checkin", "gruppen"].includes(t.status)) await step(`Turnier ${t.channelId}`, () => runTimers(t));

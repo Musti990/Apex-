@@ -39,6 +39,16 @@ export async function clubById(id) {
   return name ? { id: String(id), name: String(name) } : null;
 }
 
+/** Alle Clubs zu einem Namen (für die Auswahl bei mehreren Treffern) */
+export async function searchClubs(name) {
+  const data = await eaFetch(`/allTimeLeaderboard/search?platform=${PLATFORM}&clubName=${encodeURIComponent(name)}`, 6000);
+  const list = (Array.isArray(data) ? data : data?.clubs || Object.values(data || {}))
+    .map((c) => ({ id: String(c.clubId ?? c.clubInfo?.clubId ?? ""), name: String(c.clubName ?? c.name ?? c.clubInfo?.name ?? "") }))
+    .filter((c) => c.id && c.name);
+  const exact = list.filter((c) => norm(c.name) === norm(name));
+  return { exact, list: list.slice(0, 25) };
+}
+
 export async function searchClub(name) {
   const data = await eaFetch(`/allTimeLeaderboard/search?platform=${PLATFORM}&clubName=${encodeURIComponent(name)}`);
   const list = (Array.isArray(data) ? data : data?.clubs || Object.values(data || {}))

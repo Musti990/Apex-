@@ -90,20 +90,36 @@ export async function refreshEaLinks() {
   if (id && id !== p.ealinks) await savePanel("ealinks", id);
 }
 
-// ---------- Regelwerk ----------
+// ---------- Regelwerk (bearbeitbar über den Button „Bearbeiten“) ----------
+/** Aktueller Text: gespeicherte Fassung, sonst der Standard aus data.mjs */
+export async function rulesText() {
+  const { RULES } = await import("./data.mjs");
+  const s = await get("rulestext");
+  return s ? { ...s } : { title: RULES.title, highlight: RULES.highlight || null, sections: RULES.sections.map((x) => [...x]), version: 0 };
+}
+export async function saveRulesText(fn) {
+  const cur = await rulesText();
+  fn(cur);
+  await set("rulestext", cur);
+  return cur;
+}
+/** Version, die akzeptiert sein muss (steigt, wenn alle neu bestätigen sollen) */
+async function rulesVersion() { return RULES_VERSION + ((await get("rulestext"))?.version || 0); }
 export async function rulesAccepted(uid) {
   const r = (await get("rules")) || {};
-  return r[uid] === RULES_VERSION;
+  return r[uid] === (await rulesVersion());
 }
 export async function acceptRules(uid) {
-  const { value } = await mutate("rules", (r) => { r[uid] = RULES_VERSION; }, { initial: {} });
-  return Object.values(value).filter((v) => v === RULES_VERSION).length;
+  const ver = await rulesVersion();
+  const { value } = await mutate("rules", (r) => { r[uid] = ver; }, { initial: {} });
+  return Object.values(value).filter((v) => v === ver).length;
 }
 export async function refreshRulesPanel() {
   const cfg = await getConfig(); if (!cfg.channels.rules) return;
   const p = await panels();
-  const count = Object.values((await get("rules")) || {}).filter((v) => v === RULES_VERSION).length;
-  const id = await upsertMessage(cfg.channels.rules, p.rules, V.rulesPanel(count));
+  const ver = await rulesVersion();
+  const count = Object.values((await get("rules")) || {}).filter((v) => v === ver).length;
+  const id = await upsertMessage(cfg.channels.rules, p.rules, V.rulesPanel(count, await rulesText()));
   if (id && id !== p.rules) { await savePanel("rules", id); }
 }
 

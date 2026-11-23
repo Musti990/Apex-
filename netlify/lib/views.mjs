@@ -40,7 +40,7 @@ export function regPanel(clubs) {
       gallery(`${site()}/banner-registrieren.jpg`),
       txt(`## Mannschaft registrieren\nGründe deine **eigene Mannschaft** – mit eigenem **Namen** und eigenem **Logo**.\nJeder Name gibt es nur einmal. Du wirst automatisch **Manager**.\n👕 **${taken}** ${taken === 1 ? "Mannschaft" : "Mannschaften"} registriert`),
       line(),
-      txt("### So geht's\n1️⃣ Auf **Mannschaft registrieren** klicken\n2️⃣ **Teamname** und **EA-Club-ID** eintragen – der Bot prüft die ID direkt bei EA\n3️⃣ Logo hochladen mit `/cup-logo bild:` (optional, jederzeit änderbar)\n-# Die EA-Club-ID steht in der Adresszeile deiner Clubseite auf ea.com (`clubId=…`) oder auf Pro-Clubs-Statistikseiten. Ergebnisse und TOTT kommen dann automatisch von EA."),
+      txt("### So geht's\n1️⃣ Auf **Mannschaft registrieren** klicken\n2️⃣ **Teamname**, **EA-Clubname** und **Logo** eintragen\n3️⃣ Der Bot sucht deinen Club direkt bei EA – gibt es mehrere, wählst du deinen aus\n-# Logo später ändern: `/cup-logo bild:` · Ergebnisse und TOTT kommen automatisch von EA."),
       line(),
       row(btn("Mannschaft registrieren", "reg_start", 1, { emoji: { name: "👕" } })),
       txt("-# Pro Manager eine Mannschaft"),
@@ -48,23 +48,30 @@ export function regPanel(clubs) {
   };
 }
 
-/** Formular: neue eigene Mannschaft */
+/** Formular: neue eigene Mannschaft – Name, EA-Clubname und Logo (Datei-Upload direkt im Formular) */
 export function regModal() {
+  const label = (lbl, desc, component) => ({ type: 18, label: lbl, ...(desc ? { description: desc } : {}), component });
   return {
     type: 9,
     data: {
       custom_id: "reg_new", title: "Eigene Mannschaft gründen",
       components: [
-        row({ type: 4, custom_id: "name", label: "Teamname", style: 1, required: true, min_length: 3, max_length: 30, placeholder: "z. B. Night Wolves FC" }),
-        row({ type: 4, custom_id: "eaid", label: "EA-Club-ID (nur Zahlen)", style: 1, required: true, min_length: 3, max_length: 12, placeholder: "z. B. 1234567 – steht in der Adresse deiner EA-Clubseite (clubId=…)" }),
+        label("Teamname", "So heißt dein Team im Cup", { type: 4, custom_id: "name", style: 1, required: true, min_length: 3, max_length: 30, placeholder: "z. B. Night Wolves FC" }),
+        label("EA-Clubname", "Genau so, wie er in EA FC Pro Clubs heißt", { type: 4, custom_id: "ea", style: 1, required: true, min_length: 2, max_length: 40, placeholder: "z. B. NightWolvesFC" }),
+        label("Team-Logo", "PNG oder JPG, max. 2 MB", { type: 19, custom_id: "logo", min_values: 1, max_values: 1, required: true }),
       ],
     },
   };
 }
 
-/** Formular: EA-Club-ID ändern */
+/** Formular: EA-Club ändern (per Name) */
 export function eaIdModal(customId, title, value = "") {
-  return { type: 9, data: { custom_id: customId, title, components: [row({ type: 4, custom_id: "eaid", label: "EA-Club-ID (nur Zahlen)", style: 1, required: true, min_length: 3, max_length: 12, value: value || undefined, placeholder: "z. B. 1234567" })] } };
+  return { type: 9, data: { custom_id: customId, title, components: [row({ type: 4, custom_id: "ea", label: "EA-Clubname (genau wie in EA FC)", style: 1, required: true, min_length: 2, max_length: 40, value: value || undefined, placeholder: "z. B. NightWolvesFC" })] } };
+}
+
+/** Auswahl, wenn EA mehrere Clubs mit ähnlichem Namen findet */
+export function eaPick(customId, list, intro) {
+  return { content: intro, embeds: [], components: [row({ type: 3, custom_id: customId, placeholder: "Deinen EA-Club wählen…", options: list.slice(0, 25).map((c) => ({ label: c.name.slice(0, 100), description: `EA-Club-ID ${c.id}`, value: c.id })) })] };
 }
 
 export function eaModal(customId, title, value = "") {
@@ -107,17 +114,17 @@ export function teamDetail(c, data, role, todayDaysRaw) {
       fields: [
         { name: "Manager", value: `<@${data.manager}>`, inline: true },
         { name: `Co-VMs (${coIds(data).length}/${MAX_CO})`, value: coIds(data).length ? coIds(data).map((u) => `<@${u}>`).join("\n") : "–", inline: true },
-        { name: "EA-Club", value: data.eaId ? `${esc(data.eaName || data.ea || "–")}\n-# ID ${data.eaId}${data.eaVerified === false ? " · ⚠️ von EA nicht bestätigt" : " · ✅ verknüpft"}` : "–\n-# ⚠️ keine EA-Club-ID", inline: true },
+        { name: "EA-Club", value: data.eaId ? `${esc(data.eaName || data.ea || "–")}\n-# ID ${data.eaId}${data.eaVerified === false ? " · ⚠️ von EA nicht bestätigt" : " · ✅ verknüpft"}` : "–\n-# ⚠️ kein EA-Club verknüpft", inline: true },
         { name: "Cups", value: String(data.cups ?? 0), inline: true },
         { name: "Titel", value: String(data.titles ?? 0), inline: true },
       ],
     }],
     components: role === "manager"
       ? [
-          row(btn("Co-VM hinzufügen", "team_co_add", 1, { disabled: coIds(data).length >= MAX_CO }), btn("EA-Club-ID ändern", "team_ea", 1)),
+          row(btn("Co-VM hinzufügen", "team_co_add", 1, { disabled: coIds(data).length >= MAX_CO }), btn("EA-Club ändern", "team_ea", 1)),
           row(btn("Co-VM entfernen", "team_co_rem", 2, { disabled: !coIds(data).length }), btn("Mannschaft verlassen", "team_leave", 4), btn("Mannschaft löschen", "team_del", 4)),
         ]
-      : [row(btn("EA-Club-ID ändern", "team_ea", 1), btn("Als Co-VM austreten", "team_co_quit", 4))],
+      : [row(btn("EA-Club ändern", "team_ea", 1), btn("Als Co-VM austreten", "team_co_quit", 4))],
   };
 }
 
@@ -530,24 +537,47 @@ export function confirmAsk(m, reporter, users, h, a, pen, state = "offen") {
 }
 
 // ---------- Regelwerk ----------
-export function rulesPanel(count) {
+export function rulesPanel(count, R = RULES) {
   return {
     embeds: [{
       color: COLOR,
-      title: RULES.title,
+      title: R.title,
       thumbnail: { url: `${site()}/logo.jpg` },
-      fields: RULES.sections.map(([name, value]) => ({ name, value })),
-    }, ...(RULES.highlight ? [{
+      fields: R.sections.slice(0, 25).map(([name, value]) => ({ name: String(name).slice(0, 256), value: String(value).slice(0, 1024) })),
+    }, ...(R.highlight?.text ? [{
       color: 0xe02424, // rot, damit die Regel sofort auffällt
-      title: RULES.highlight.title,
-      description: RULES.highlight.text,
+      title: R.highlight.title,
+      description: R.highlight.text,
     }] : []), {
       color: COLOR,
       description: "Mit dem Button unten akzeptierst du das Regelwerk.",
       footer: { text: `${count} ${count === 1 ? "Mitglied hat" : "Mitglieder haben"} das Regelwerk akzeptiert · Erst danach ist die Anmeldung zum Cup möglich` },
     }],
-    components: [row(btn("Regeln akzeptieren", "rules_ok", 3, { emoji: { name: "✅" } }))],
+    components: [row(btn("Regeln akzeptieren", "rules_ok", 3, { emoji: { name: "✅" } }), btn("Bearbeiten", "rules_edit", 2, { emoji: { name: "✏️" } }))],
   };
+}
+
+/** Auswahl: welcher Teil des Regelwerks bearbeitet werden soll */
+export function rulesEditMenu(R) {
+  const opts = [
+    { label: "Überschrift", value: "title", emoji: { name: "🏷️" }, description: String(R.title).slice(0, 100) },
+    { label: "Roter Hinweis-Kasten", value: "hl", emoji: { name: "🔴" }, description: (R.highlight?.title || "(leer)").slice(0, 100) },
+    ...R.sections.slice(0, 20).map(([t], k) => ({ label: `${k + 1}. ${String(t).replace(/[*_`]/g, "")}`.slice(0, 100), value: `s${k}`, emoji: { name: "📄" } })),
+    ...(R.sections.length < 25 ? [{ label: "Neuer Abschnitt", value: "new", emoji: { name: "➕" } }] : []),
+    { label: "Alle müssen neu akzeptieren", value: "reaccept", emoji: { name: "🔁" }, description: "Nach wichtigen Änderungen" },
+    { label: "Standard wiederherstellen", value: "reset", emoji: { name: "↩️" }, description: "Original-Regelwerk zurück" },
+  ];
+  return { content: "✏️ **Regelwerk bearbeiten** – was möchtest du ändern?\n-# Abschnitt löschen: Abschnitt wählen und beide Felder leeren.", components: [row({ type: 3, custom_id: "rules_edsel", placeholder: "Teil wählen…", options: opts.slice(0, 25) })] };
+}
+
+/** Formular für einen Teil */
+export function rulesEditModal(which, R) {
+  const f = (id, label, value, max, long = true, req = false) => row({ type: 4, custom_id: id, label, style: long ? 2 : 1, required: req, max_length: max, ...(value ? { value: String(value).slice(0, max) } : {}) });
+  if (which === "title") return { type: 9, data: { custom_id: "rules_ed:title", title: "Überschrift", components: [f("t", "Überschrift", R.title, 256, false, true)] } };
+  if (which === "hl") return { type: 9, data: { custom_id: "rules_ed:hl", title: "Roter Hinweis-Kasten", components: [f("t", "Titel (leer = Kasten weg)", R.highlight?.title, 256, false), f("x", "Text", R.highlight?.text, 4000)] } };
+  if (which === "new") return { type: 9, data: { custom_id: "rules_ed:new", title: "Neuer Abschnitt", components: [f("t", "Überschrift", "", 256, false, true), f("x", "Text", "", 1024, true, true)] } };
+  const k = Number(which.slice(1)), [t, x] = R.sections[k] || ["", ""];
+  return { type: 9, data: { custom_id: `rules_ed:s${k}`, title: `Abschnitt ${k + 1}`, components: [f("t", "Überschrift (beide leer = löschen)", t, 256, false), f("x", "Text", x, 1024)] } };
 }
 
 export const videoMinuteModal = (limit) => ({ type: 9, data: { custom_id: "vid_min", title: "Größenvideo anfordern", components: [row({ type: 4, custom_id: "min", label: `Aktuelle Spielminute (nur bis zur ${limit}.)`, style: 1, required: true, max_length: 3, placeholder: "z. B. 23" })] } });
@@ -581,9 +611,9 @@ export function rolesPanel() {
       color: COLOR,
       title: "🎭 ROLLENAUSWAHL",
       thumbnail: { url: `${site()}/logo.jpg` },
-      description: "Wähle hier deine Rolle für die Apex Arena.",
+      description: "Wähle hier deine Rolle für die Apex Arena.\n🔓 **Erst mit einer Rolle siehst du alle Kanäle** des Servers.",
       fields: [
-        { name: "👔 Manager", value: "Du willst einen Verein übernehmen und an den Cups teilnehmen? Die Rolle bekommst du sofort – danach suchst du dir deinen Verein aus." },
+        { name: "👔 Manager", value: "Du willst ein eigenes Team gründen und an den Cups teilnehmen? Die Rolle bekommst du sofort – danach registrierst du dein Team." },
         { name: "⚽ Spieler", value: "Du spielst in einer Mannschaft mit oder willst alles verfolgen? Die Rolle bekommst du sofort." },
       ],
       footer: { text: "Wer Manager wird, verliert automatisch die Spieler-Rolle · Nochmal drücken entfernt die Rolle wieder." },
