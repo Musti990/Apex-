@@ -22,7 +22,7 @@ export function adminPanel(t) {
         "**👥 Teams** – Team hinzufügen · abmelden · Freilos + / − · Team auflösen",
         "**⚽ Spiele** – offene Spiele · Ergebnis festlegen · EA verknüpfen · TOTT posten",
         "**🚫 Sperren** – sperren · Sperre aufheben",
-        "**🧪 Test & Pflege** – Test-Cup · Test-Spiele ausspielen · Panels · Rechte · Status",
+        "**🧪 Test & Pflege** – Test-Cup · Test-Spiele ausspielen · Kanäle säubern · Panels · Rechte · Status",
       ].join("\n"),
       footer: { text: "Nur Turnierleitung · Antworten siehst nur du" },
     }],
@@ -31,7 +31,7 @@ export function adminPanel(t) {
       row(b("Team hinzufügen", "adm:add", "➕", 2), b("Team abmelden", "adm:rem", "➖", 2), b("Freilos +", "adm:fl+", "🎟️", 2), b("Freilos −", "adm:fl-", "🎟️", 2), b("Team auflösen", "adm:del", "🗑️", 4)),
       row(b("Offene Spiele", "adm:games", "📋", 2), b("Ergebnis festlegen", "adm:result", "✏️", 1), b("EA verknüpfen", "adm:ea", "🔗", 2), b("TOTT posten", "adm:tott", "⭐", 2)),
       row(b("Sperren", "ban_start", "🚫", 4), b("Sperre aufheben", "ban_lift", "🔓", 2), b("Test-Cup", "adm:test", "🧪", 2), b("Test-Spiele ausspielen", "adm:testgo", "▶️", 2)),
-      row(b("Panels aktualisieren", "adm:panels", "🔄", 2), b("Rechte setzen", "adm:perms", "🔐", 2), b("Status", "adm:status", "📊", 2), b("Panel neu laden", "adm:refresh", "♻️", 2)),
+      row(b("Kanäle säubern", "adm:clean", "🧹", 2), b("Panels aktualisieren", "adm:panels", "🔄", 2), b("Rechte setzen", "adm:perms", "🔐", 2), b("Status", "adm:status", "📊", 2), b("Panel neu laden", "adm:refresh", "♻️", 2)),
     ],
   };
 }
@@ -55,6 +55,19 @@ export const delTeamModal = () => modal("admm:del", "Team auflösen", [
   { custom_id: "team", label: "Teamname (genau wie in der Übersicht)", max_length: 30 },
   { custom_id: "grund", label: "Grund (wird dem Manager geschickt)", max_length: 200, req: false, placeholder: "z. B. inaktiv, Regelverstoß …" },
 ]);
+
+/** 🧹 Auswahl: welche Kanäle gesäubert werden */
+export function cleanPick() {
+  const o = (label, value, emoji, description) => ({ label, value, emoji: { name: emoji }, description });
+  return { content: "🧹 **Welche Kanäle sollen gesäubert werden?** (Mehrfachauswahl)\n-# Panels und die Posts des laufenden Cups bleiben immer stehen. Nur Nachrichten der letzten 13 Tage lassen sich löschen.", components: [row({ type: 3, custom_id: "adm:cleanpick", placeholder: "Kanäle wählen…", min_values: 1, max_values: 6, options: [
+    o("Gruppenkanäle", "groups", "⚽", "Gruppe A–H"),
+    o("Ergebnis-Kanäle", "results", "📥", "A–H-Ergebnisse + KO-Ergebnisse"),
+    o("K.-o.-Kanal", "ko", "⚔️", "KO-Phase"),
+    o("Live-Spielplan", "live", "📺"),
+    o("Admin-Panel-Kanal", "admin", "🛠️", "z. B. Reste vom Test-Cup"),
+    o("Alles oben", "all", "🧹", "alle Turnier-Kanäle + Admin-Panel"),
+  ] })] };
+}
 
 /** Auswahl eines Teams (für hinzufügen/abmelden) */
 export function teamPick(id, names, placeholder) {

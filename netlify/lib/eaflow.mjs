@@ -7,7 +7,7 @@
 import { get, mutate, getConfig, getClubs, tKey } from "./store.mjs";
 import { sendMessage, sendWithFile } from "./discord.mjs";
 import * as T from "./tournament.mjs";
-import { allTournaments, afterResult, resultChannelOf } from "./flow.mjs";
+import { allTournaments, afterResult, resultChannelOf, sendTemp } from "./flow.mjs";
 import { isFreilos, flagOf } from "./data.mjs";
 import * as EA from "./ea.mjs";
 
@@ -163,7 +163,7 @@ async function checkTournament(t, left) {
         await afterResult(t, done, res.events, true);
         const info = EA.abortInfo(em);
         await eaStatusPost(`✅ **EA-Daten erfasst · Spiel #${m.id}** (${m.phase === "gruppe" ? `Gruppe ${m.group}, Spieltag ${m.round}` : "K.-o."})\n📊 ${m.home} **${h}:${a}** ${m.away} · Ergebnis automatisch übernommen${info.min != null ? ` · ${info.min} Min.` : ""}\n${statLine(players, m.home, m.away)}`);
-        if (ch) await sendMessage(ch, { content: `📡 **Ergebnis automatisch von EA übernommen:** ${flagOf(m.home)} **${m.home}** ${h}:${a} **${m.away}** ${flagOf(m.away)}${info.overtime && m.phase === "gruppe" ? "\n-# ⚠️ Laut EA wurde über 90 Minuten hinaus gespielt – Tore aus der Verlängerung zählen mit. In der Gruppenphase bei Unentschieden direkt nach Abpfiff verlassen." : ""}`, allowed_mentions: { parse: [] } });
+        if (ch) await sendTemp(ch, { content: `📡 **Ergebnis automatisch von EA übernommen:** ${flagOf(m.home)} **${m.home}** ${h}:${a} **${m.away}** ${flagOf(m.away)}${info.overtime && m.phase === "gruppe" ? "\n-# ⚠️ Laut EA wurde über 90 Minuten hinaus gespielt – Tore aus der Verlängerung zählen mit. In der Gruppenphase bei Unentschieden direkt nach Abpfiff verlassen." : ""}`, allowed_mentions: { parse: [] } });
       }
     }
   }

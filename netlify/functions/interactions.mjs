@@ -203,8 +203,15 @@ async function adminPanelClick(i, context, cfg) {
   if (id.startsWith("adm:delok:")) { const enc = id.slice(10); id = "adm:delok"; i = { ...i, data: { ...i.data, custom_id: "adm:delok:" + enc } }; }
   switch (id) {
     case "adm:new": return AP.newCupModal();
-    case "adm:close": return run("anmeldeschluss");
-    case "adm:ciend": return run("checkin-ende");
+    case "adm:close": case "adm:ciend": {
+      const t = await F.currentCup();
+      if (!t) return eph("Gerade läuft kein Cup.");
+      if (id === "adm:close" && t.status !== "anmeldung") return eph("Die Anmeldung ist schon geschlossen.");
+      if (id === "adm:ciend" && t.status !== "checkin") return eph("Gerade läuft kein Check-in.");
+      const now = Date.now() - 1000;
+      await mutate(tKey(t.channelId), (x) => { if (id === "adm:close") x.times.close = Math.min(x.times.close, now); else { x.times.checkinEnd = Math.min(x.times.checkinEnd, now); x.times.kickoff = Math.min(x.times.kickoff, now); } });
+      return eph(id === "adm:close" ? "⏩ **Anmeldeschluss gesetzt** – in der nächsten Minute wird ausgelost und der Check-in startet." : "✅ **Check-in endet jetzt** – in der nächsten Minute werden die Gruppen gepostet, danach wird **Spieltag 1** freigegeben.");
+    }
     case "adm:cancel": return eph("⚠️ **Cup wirklich abbrechen?** Alle Turnier-Rollen werden entfernt, Ergebnisse zählen nicht.", { components: [{ type: 1, components: [{ type: 2, style: 2, label: "Nein", custom_id: "adm:nop" }, { type: 2, style: 4, label: "Ja, abbrechen", custom_id: "adm:cancelok" }] }] });
     case "adm:cancelok": { const r = await run("abbrechen"); return r; }
     case "adm:nop": return { type: 7, data: { content: "Abgebrochen – nichts passiert.", components: [] } };
@@ -249,18 +256,37 @@ async function adminPanelClick(i, context, cfg) {
       const tch = cfg.channels.adminpanel || cfg.channels.admin || i.channel_id;
       return background(i, context, async () => {
         const r = await F.startTestCup(tch, uidOf(i), 8);
-        const t = await F.fastForwardTestCup(tch);
-        return `🧪 **Test-Cup läuft!** 8 Teams, schon ausgelost und eingecheckt – **${t.status === "gruppen" ? `Spieltag ${t.round}` : t.status}** ist freigegeben.\n${r.mine ? `• Deine Mannschaft **${V.esc(r.mine.club)}** spielt mit – melde deine Spiele über die Knöpfe.` : "• Du hast kein eigenes Team – es spielen nur Test-Teams."}\n• **▶️ Test-Spiele ausspielen** spielt alle Test-Spiele sofort (Runde für Runde bis zum Finale).\n• Beenden: **🛑 Cup abbrechen**.\n-# Keine Statistik, kein TOTT, keine Trophäen.`;
+        await F.fastForwardTestCup(tch);
+        return `🧪 **Test-Cup gestartet!** 8 Teams, alle werden automatisch eingecheckt.\n⏳ In **ca. 1–3 Minuten** ist ausgelost und **Spieltag 1** freigegeben – die Posts erscheinen nach und nach in den Gruppenkanälen.\n${r.mine ? `• Deine Mannschaft **${V.esc(r.mine.club)}** spielt mit – melde deine Spiele über die Knöpfe.` : "• Du hast kein eigenes Team – es spielen nur Test-Teams."}\n• Die Test-Spiele laufen **jede Minute von selbst** – mit **▶️ Test-Spiele ausspielen** geht's sofort.\n• Beenden: **🛑 Cup abbrechen**.\n-# Keine Statistik, kein TOTT.`;
       });
     }
     case "adm:testgo": return background(i, context, async () => {
       const t0 = await F.currentCup();
       if (!t0?.test) return "Gerade läuft kein Test-Cup – erst **🧪 Test-Cup** klicken.";
-      if (["anmeldung", "checkin"].includes(t0.status)) await F.fastForwardTestCup(t0.channelId);
-      const n = await F.playVirtualMatches(t0.channelId, 2); // 2 Runden pro Klick (Netlify-Zeitlimit)
+      if (["anmeldung", "checkin"].includes(t0.status) || (t0.status === "gruppen" && !t0.kickoffDone)) return "⏳ Der Test-Cup wird gerade ausgelost bzw. angepfiffen – bitte noch 1–2 Minuten warten.";
+      const n = await F.playVirtualMatches(t0.channelId, 1); // 1 Runde pro Klick (Netlify-Zeitlimit)
       const t = await get(tKey(t0.channelId));
       return t.status === "fertig" ? `🏆 Test-Cup beendet – Sieger: **${V.esc(t.podium?.[0] || "?")}**. Siegerbild & Turnierbaum stehen in den Kanälen.` : n ? `🧪 ${n} Test-Spiele gespielt – jetzt: **${t.status === "gruppen" ? `Spieltag ${t.round}` : "K.-o.-Phase"}**. Nochmal klicken für die nächste Runde.` : "🧪 Keine offenen Test-Spiele – jetzt bist du mit deinem Spiel dran (oder Ergebnis festlegen).";
     });
+    case "adm:clean": return eph("", AP.cleanPick());
+    case "adm:cleanpick": {
+      const pick = new Set(i.data.values || []), all = pick.has("all"), G8 = ["A", "B", "C", "D", "E", "F", "G", "H"];
+      const c = cfg.channels, chans = [];
+      if (all || pick.has("groups")) chans.push(...G8.map((g) => c["g" + g]));
+      if (all || pick.has("results")) chans.push(...G8.map((g) => c["r" + g]), c.kor);
+      if (all || pick.has("ko")) chans.push(c.ko);
+      if (all || pick.has("live")) chans.push(c.live);
+      if (all || pick.has("admin")) chans.push(c.adminpanel || c.admin);
+      const list = [...new Set(chans.filter(Boolean))];
+      if (!list.length) return { type: 7, data: { content: "Keine passenden Kanäle verknüpft.", components: [] } };
+      return background(i, context, async () => {
+        const CL = await import("../lib/cleanup.mjs");
+        await CL.queueClean(list);
+        const n = await CL.runCleanJobs(5000); // Rest erledigt der Minuten-Timer
+        const left = ((await get("cleanjobs")) || []).length;
+        return `🧹 **${n} Nachrichten gelöscht** in ${list.length - left} von ${list.length} Kanälen.${left ? `\n⏳ ${left} Kanäle folgen in der nächsten Minute automatisch.` : " ✅ Fertig."}\n-# Panels und die Posts des laufenden Cups sind geblieben.`;
+      }, { update: true });
+    }
     case "adm:panels": return setup(asCmd(i, i.channel_id, "cup-einrichten", "panels"), context, cfg);
     case "adm:perms": return setup(asCmd(i, i.channel_id, "cup-einrichten", "rechte"), context, cfg);
     case "adm:status": return setup(asCmd(i, i.channel_id, "cup-einrichten", "status"), context, cfg);

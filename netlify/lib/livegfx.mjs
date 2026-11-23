@@ -40,7 +40,7 @@ async function matchRow(x, m, X, Y, W, t) {
   x.fillStyle = done ? "#0b0c10" : "#16181f"; rr(x, mid - 52, Y + 9, 104, h - 18, 8); x.fill();
   x.strokeStyle = done ? ACC : "rgba(255,255,255,.15)"; x.lineWidth = 1.5; rr(x, mid - 52, Y + 9, 104, h - 18, 8); x.stroke();
   x.textAlign = "center"; x.font = '30px "Bebas Neue"'; x.fillStyle = done ? "#fff" : MUTED;
-  x.fillText(done ? `${m.h} : ${m.a}` : m.pendingBy ? "WARTET" : "LIVE", mid, cy + 1);
+  x.fillText(done ? `${m.h} : ${m.a}` : m._future ? "– : –" : m.pendingBy ? "WARTET" : "LIVE", mid, cy + 1);
   if (done && m.pen) { x.font = "700 11px Montserrat"; x.fillStyle = "#ffd9c7"; x.fillText(`${m.pen[0]}:${m.pen[1]} i.E.`, mid, Y + h - 5); }
   x.textAlign = "left";
   return h;
@@ -115,5 +115,63 @@ export async function liveImage(t) {
   }
   x.textAlign = "center"; x.font = "600 14px Montserrat"; x.fillStyle = MUTED;
   x.fillText(`● LIVE · Ergebnisse direkt von EA oder gemeldet · aktualisiert ${new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", hour: "2-digit", minute: "2-digit" }).format(new Date())} Uhr`, W / 2, H - 30);
+  return c.toBuffer("image/png");
+}
+
+
+/** Bild für einen Gruppenkanal: Kopf, alle Spieltage (aktueller hervorgehoben) und Tabelle */
+export async function groupImage(t, groupName) {
+  fonts();
+  const g = t.groups.find((x) => x.name === groupName); if (!g) return null;
+  const d = FORMATS[t.fmt] || { top: 2 };
+  const ms = t.matches.filter((m) => m.group === groupName);
+  const rounds = [...new Set(ms.map((m) => m.round))].sort((a, b) => a - b);
+  const cur = t.status === "gruppen" ? t.round : t.status === "checkin" ? 0 : 99;
+  const W = 1200, perRound = (r) => ms.filter((m) => m.round === r).length;
+  const body = rounds.reduce((h, r) => h + 50 + perRound(r) * 62, 0);
+  const H = 250 + body + 70 + g.teams.length * 40 + 110;
+  const c = createCanvas(W, H), x = c.getContext("2d");
+  bg(x, W, H);
+  try { const lg = await loadImage(path.join(assetDir(), "apex-logo.png")); x.shadowColor = ACC; x.shadowBlur = 16; x.drawImage(lg, 40, 26, 160, 160 * lg.height / lg.width); x.shadowBlur = 0; } catch {}
+  x.textAlign = "center"; x.textBaseline = "middle";
+  x.font = '86px "Bebas Neue"'; const tg = x.createLinearGradient(0, 40, 0, 120); tg.addColorStop(0, "#fff"); tg.addColorStop(1, "#ffb08a"); x.fillStyle = tg; x.shadowColor = "rgba(255,90,31,.5)"; x.shadowBlur = 20; x.fillText(`GRUPPE ${groupName}`, W / 2, 82); x.shadowBlur = 0;
+  fit(x, t.name, "600 {s}px Montserrat", 22, 700); x.fillStyle = TEXT; x.fillText(t.name, W / 2, 138);
+  const st = t.status === "checkin" ? "CHECK-IN LÄUFT" : t.status === "gruppen" ? `SPIELTAG ${t.round} LÄUFT` : "GRUPPENPHASE BEENDET";
+  x.font = "800 15px Montserrat"; x.fillStyle = ACC; x.fillText(st, W / 2, 170);
+  let y = 210; const PX = 60, PW = W - 120;
+  for (const r of rounds) {
+    const live = r === cur, done = r < cur;
+    x.textAlign = "left"; x.font = '30px "Bebas Neue"'; x.fillStyle = live ? "#fff" : done ? "#cfd1da" : MUTED;
+    x.fillText(`SPIELTAG ${r}`, PX, y + 16);
+    const lw = x.measureText(`SPIELTAG ${r}`).width;
+    if (live) { x.fillStyle = ACC; rr(x, PX + lw + 14, y + 4, 64, 24, 12); x.fill(); x.font = "800 12px Montserrat"; x.fillStyle = "#fff"; x.textAlign = "center"; x.fillText("LIVE", PX + lw + 46, y + 17); }
+    else if (done) { x.font = "700 13px Montserrat"; x.fillStyle = GREEN; x.textAlign = "left"; x.fillText("BEENDET", PX + lw + 14, y + 17); }
+    else { x.font = "700 13px Montserrat"; x.fillStyle = MUTED; x.textAlign = "left"; x.fillText("FOLGT", PX + lw + 14, y + 17); }
+    y += 42;
+    for (const m of ms.filter((z) => z.round === r)) {
+      x.save(); if (!live && !done) x.globalAlpha = 0.55;
+      y += (await matchRow(x, m.status === "fertig" || live ? m : { ...m, status: "offen", pendingBy: null, _future: true }, PX, y, PW, t)) + 8;
+      x.restore();
+    }
+    y += 8;
+  }
+  // Tabelle
+  y += 10; x.textAlign = "left"; x.font = '30px "Bebas Neue"'; x.fillStyle = "#fff"; x.fillText("TABELLE", PX, y + 14); x.fillStyle = ACC; x.fillRect(PX, y + 32, 70, 3); y += 48;
+  x.font = "700 13px Montserrat"; x.fillStyle = MUTED; x.fillText("#", PX + 14, y + 10); x.fillText("TEAM", PX + 90, y + 10); x.textAlign = "center";
+  [["SP", 700], ["S", 770], ["U", 830], ["N", 890], ["TORE", 975], ["TD", 1050], ["PKT", 1110]].forEach(([l, cx]) => x.fillText(l, cx, y + 10)); y += 24;
+  for (const [k, row] of standings(t, groupName).entries()) {
+    const out = isFreilos(row.id) || t.out?.includes(row.id), q = !out && k < d.top;
+    x.fillStyle = k % 2 ? "rgba(255,255,255,.03)" : "rgba(255,255,255,.06)"; rr(x, PX, y, PW, 36, 6); x.fill();
+    if (q) { x.fillStyle = GREEN; x.fillRect(PX, y + 4, 4, 28); }
+    x.textAlign = "left"; x.font = '24px "Bebas Neue"'; x.fillStyle = out ? MUTED : "#fff"; x.fillText(String(k + 1), PX + 14, y + 19);
+    await logoAt(x, row.id, PX + 46, y + 5, 26);
+    fit(x, String(row.id).toUpperCase(), '{s}px "Bebas Neue"', 24, 520); x.fillStyle = out ? MUTED : "#fff"; x.fillText(String(row.id).toUpperCase(), PX + 90, y + 19);
+    x.textAlign = "center"; x.font = '24px "Bebas Neue"'; const td = row.t - row.gt;
+    [[row.sp, 700], [row.s, 770], [row.u, 830], [row.n, 890], [`${row.t}:${row.gt}`, 975], [(td > 0 ? "+" : "") + td, 1050]].forEach(([v, cx]) => { x.fillStyle = out ? MUTED : TEXT; x.fillText(String(v), cx, y + 19); });
+    x.fillStyle = q ? GOLD : out ? MUTED : "#fff"; x.font = '28px "Bebas Neue"'; x.fillText(String(row.p), 1110, y + 19);
+    y += 40;
+  }
+  x.textAlign = "center"; x.font = "600 14px Montserrat"; x.fillStyle = MUTED;
+  x.fillText(`Grün = weiter (Top ${d.top}) · Ergebnisse direkt von EA oder gemeldet · aktualisiert ${new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", hour: "2-digit", minute: "2-digit" }).format(new Date())} Uhr`, W / 2, H - 30);
   return c.toBuffer("image/png");
 }

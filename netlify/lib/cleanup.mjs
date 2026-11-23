@@ -60,6 +60,36 @@ export async function purgeExcept(ch, keep = []) {
   return ids.length;
 }
 
+/** 🧹 Manuelles Säubern (Admin-Panel): Kanäle in die Warteschlange, Panels & aktuelle Cup-Posts bleiben */
+export async function queueClean(channels) {
+  await mutate("cleanjobs", (l) => { for (const ch of channels) if (ch && !l.includes(ch)) l.push(ch); }, { initial: [] });
+}
+/** IDs, die nie gelöscht werden: alle Panels + Posts des aktuellen Cups */
+async function keepIds() {
+  const keep = new Set();
+  const p = (await get("panels")) || {};
+  for (const v of Object.values(p)) (Array.isArray(v) ? v : [v]).forEach((x) => typeof x === "string" && /^\d+$/.test(x) && keep.add(x));
+  const F = await import("./flow.mjs");
+  const t = await F.currentCup().catch(() => null);
+  const walk = (o) => { if (!o) return; if (typeof o === "string" && /^\d{15,}$/.test(o)) keep.add(o); else if (typeof o === "object") Object.values(o).forEach(walk); };
+  if (t && !["fertig", "abgesagt", "geloescht"].includes(t.status)) walk(t.msgs);
+  return [...keep];
+}
+export async function runCleanJobs(budgetMs = 6000) {
+  const deadline = Date.now() + budgetMs;
+  let list = (await get("cleanjobs")) || [];
+  if (!list.length) return 0;
+  const keep = await keepIds();
+  let n = 0;
+  while (list.length && Date.now() < deadline - 1500) {
+    const ch = list[0];
+    try { n += await purgeExcept(ch, keep); } catch (e) { console.error("Säubern:", e?.message || e); }
+    await mutate("cleanjobs", (l) => { const i = l.indexOf(ch); if (i >= 0) l.splice(i, 1); }, { initial: [] });
+    list = list.slice(1);
+  }
+  return n;
+}
+
 /** Vom Timer: fällige Aufräum-Aufträge abarbeiten */
 export async function runCleanup(budgetMs = 8000, now = Date.now()) {
   const deadline = Date.now() + budgetMs;

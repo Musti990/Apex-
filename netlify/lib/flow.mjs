@@ -5,7 +5,7 @@ import { sendMessage, editMessage, upsertMessage, sendWithFile, deleteMessage } 
 import { enqueue } from "./roles.mjs";
 import * as T from "./tournament.mjs";
 import * as V from "./views.mjs";
-import { DAYS, ROUND_ROLES, RULES_VERSION, CLUBS, flagOf } from "./data.mjs";
+import { DAYS, ROUND_ROLES, RULES_VERSION, CLUBS, flagOf, isFreilos } from "./data.mjs";
 import { viennaParts, viennaAt, shortDate, todayKey } from "./time.mjs";
 import { setNick, nickFor } from "./names.mjs";
 import { scheduleCleanup, purgeExcept } from "./cleanup.mjs";
@@ -46,13 +46,43 @@ export async function refreshOverview() {
   await refreshEaLinks().catch((e) => console.error("EA-Verknüpfungen:", e?.message || e));
 }
 
-/** ⚙️ Admin-Panel im Admin-Kanal posten bzw. aktualisieren (Status des aktuellen Cups) */
-export async function refreshAdminPanel() {
+/** ⚙️ Admin-Panel im Admin-Kanal posten bzw. aktualisieren (Status des aktuellen Cups).
+ *  Nur EIN Panel: Schlägt das Bearbeiten fehl (z. B. kurz zu viele Anfragen), wird nur neu gepostet,
+ *  wenn die alte Nachricht wirklich gelöscht ist. Ändert sich nichts, wird nichts geschickt. */
+export async function refreshAdminPanel({ force = false } = {}) {
   const cfg = await getConfig(); const ch = cfg.channels.adminpanel || cfg.channels.admin; if (!ch) return;
-  const t = await currentCup();
+  const payload = (await import("./adminpanel.mjs")).adminPanel(await currentCup());
+  const hash = JSON.stringify(payload).length + ":" + JSON.stringify(payload).slice(0, 400);
   const p = await panels();
-  const id = await upsertMessage(ch, p.adminpanel, (await import("./adminpanel.mjs")).adminPanel(t));
-  if (id && id !== p.adminpanel) await savePanel("adminpanel", id);
+  if (!force && p.adminpanel && p.adminpanelHash === hash) return;
+  const { editMessage, discord } = await import("./discord.mjs");
+  if (p.adminpanel) {
+    if (await editMessage(ch, p.adminpanel, payload)) { await savePanel("adminpanelHash", hash); return; }
+    const still = await discord(`/channels/${ch}/messages/${p.adminpanel}`).catch(() => null);
+    if (still?.id) return; // existiert noch → beim nächsten Mal wieder versuchen, NICHT doppelt posten
+  }
+  // Sperre gegen gleichzeitiges Posten
+  const { result: mine } = await mutate("panels", (x) => { if (x.adminpanelLock && Date.now() - x.adminpanelLock < 30000) return false; x.adminpanelLock = Date.now(); return true; }, { initial: { over: [] } });
+  if (!mine) return;
+  const m = await sendMessage(ch, payload);
+  await mutate("panels", (x) => { if (m?.id) { x.adminpanel = m.id; x.adminpanelHash = hash; } x.adminpanelLock = 0; }, { initial: { over: [] } });
+}
+
+/** Nachricht, die nach ein paar Sekunden wieder verschwindet (Ergebnis-Bestätigungen) */
+export async function sendTemp(ch, payload, ms = 5000) {
+  const m = await sendMessage(ch, payload);
+  if (!m?.id) return m;
+  await mutate("tempdel", (l) => { l.push({ ch, id: m.id, at: Date.now() + ms }); }, { initial: [] });
+  const { deleteMessage } = await import("./discord.mjs");
+  setTimeout(() => deleteMessage(ch, m.id).catch(() => {}), ms); // klappt meistens sofort; sonst räumt der Minuten-Timer auf
+  return m;
+}
+export async function runTempDeletes() {
+  const { deleteMessage } = await import("./discord.mjs");
+  const list = (await get("tempdel")) || [];
+  const due = list.filter((x) => x.at <= Date.now());
+  for (const x of due) await deleteMessage(x.ch, x.id).catch(() => {});
+  if (due.length) await mutate("tempdel", (l) => l.filter((x) => x.at > Date.now()), { initial: [] });
 }
 /** Aktueller Cup: laufend, sonst die Anmeldung im Anmelde-Kanal, sonst der zuletzt beendete */
 export async function currentCup() {
@@ -202,7 +232,6 @@ export async function launchTournament({ channelId, name, times, day, date }, { 
 }
 
 export async function refreshSignup(t) {
-  refreshAdminPanel().catch(() => {});
   if (!t.msgs.panel) return;
   const id = await upsertMessage(t.channelId, t.msgs.panel, V.signupPanel(t, await getClubs()));
   if (id && id !== t.msgs.panel) await mutate(tKey(t.channelId), (x) => { x.msgs.panel = id; });
@@ -302,7 +331,7 @@ export async function doCheckinEnd(channelId) {
   for (const g of t.groups) {
     const ch = cfg.channels["g" + g.name]; if (!ch) continue;
     await refreshGroupCheckin(t, g.name);
-    const plan = await sendMessage(ch, V.groupPlan(t, g, cfg.channels["r" + g.name]));
+    const plan = await postGroupImage(t, g, ch, cfg);
     if (plan) { await mutate(tKey(channelId), (x) => { x.msgs.groups[g.name] = { ...(x.msgs.groups[g.name] || {}), plan: plan.id }; }); }
   }
   const fresh = await get(tKey(channelId));
@@ -320,7 +349,11 @@ async function postGroupFreigabe(t, g, round, cfg) {
   const fresh = (await get(tKey(t.channelId))) || t;
   const keep = [fresh.msgs?.groups?.[g.name]?.plan, fresh.msgs?.groups?.[g.name]?.res];
   try { await purgeExcept(ch, keep); } catch (e) { console.error("Gruppenkanal leeren:", e?.message || e); }
-  await sendMessage(ch, V.freigabePost(t, g, round, role, cfg.channels["r" + g.name]));
+  // Kurze Markierung statt langem Text – Paarungen & Tabelle stehen im Gruppenbild darüber
+  const playing = new Set(t.matches.filter((m) => m.group === g.name && m.round === round).flatMap((m) => [m.home, m.away]));
+  const bye = g.teams.filter((c) => !playing.has(c) && !isFreilos(c));
+  const rch = cfg.channels["r" + g.name];
+  await sendMessage(ch, { content: `${role ? `<@&${role}> ` : ""}🟢 **Gruppe ${g.name} · Spieltag ${round}** – ihr dürft spielen!${rch ? ` Ergebnis kommt automatisch von EA, sonst in <#${rch}> melden.` : ""}${bye.length ? `\n-# Spielfrei: ${bye.map((c) => V.esc(c)).join(", ")}` : ""}`, allowed_mentions: { roles: role ? [role] : [] } });
 }
 
 /** KO-Kanal leeren (Turnierbaum und ggf. Ergebnis-Panel bleiben) und die neue Runde posten */
@@ -378,7 +411,6 @@ export async function videoSubmitted(t, v) {
 }
 // ---------- Aktualisieren ----------
 export async function refreshLive(t) {
-  refreshAdminPanel().catch(() => {});
   const cfg = await getConfig();
   if (!cfg.channels.live) return;
   // Live-Spielplan als Bild (Apex-Look); falls das Bild nicht klappt: Text wie bisher
@@ -403,10 +435,27 @@ export async function refreshLive(t) {
   const id = await upsertMessage(cfg.channels.live, t.msgs.live, V.livePlan(t));
   if (id && id !== t.msgs.live) await mutate(tKey(t.channelId), (x) => { x.msgs.live = id; });
 }
+/** Gruppenbild (alle Spieltage + Tabelle) posten – Notlösung: Text-Spielplan wie früher */
+async function groupImg(t, gName) {
+  try { return await (await import("./livegfx.mjs")).groupImage(t, gName); } catch (e) { console.error("Gruppenbild:", e?.message || e); return null; }
+}
+async function postGroupImage(t, g, ch, cfg) {
+  const img = await groupImg(t, g.name);
+  if (img) return sendWithFile(ch, { content: "" }, `gruppe-${g.name}.png`, img);
+  return sendMessage(ch, V.groupPlan(t, g, cfg.channels["r" + g.name]));
+}
 export async function refreshGroupPlan(t, gName) {
   const cfg = await getConfig();
   const g = t.groups.find((x) => x.name === gName), ch = cfg.channels["g" + gName], id = t.msgs.groups?.[gName]?.plan;
-  if (g && ch && id) await editMessage(ch, id, V.groupPlan(t, g, cfg.channels["r" + gName]));
+  if (g && ch && id) {
+    const img = await groupImg(t, gName);
+    const { editWithFile } = await import("./discord.mjs");
+    const ok = img ? await editWithFile(ch, id, { content: "", embeds: [], components: [] }, `gruppe-${gName}.png`, img) : await editMessage(ch, id, V.groupPlan(t, g, cfg.channels["r" + gName]));
+    if (!ok && img) { // alte Text-Nachricht lässt sich nicht in ein Bild umbauen → neu posten
+      const m = await sendWithFile(ch, { content: "" }, `gruppe-${gName}.png`, img);
+      if (m?.id) { await deleteMessage(ch, id).catch(() => {}); await mutate(tKey(t.channelId), (x) => { x.msgs.groups[gName] = { ...(x.msgs.groups[gName] || {}), plan: m.id }; }); }
+    }
+  }
   await refreshResultPanel(t, gName);
 }
 export async function refreshBracket(t) {
@@ -435,7 +484,7 @@ export async function refreshBracket(t) {
 export async function afterResult(t, m, events, byAdmin = false) {
   const cfg = await getConfig();
   const ch = resultChannelOf(cfg, m);
-  if (ch) await sendMessage(ch, V.resultConfirmed(m, byAdmin));
+  if (ch) await sendTemp(ch, V.resultConfirmed(m, byAdmin)); // nur ca. 5 Sekunden sichtbar
   await closeAsk(t, m, m.auto ? "auto" : "bestaetigt");
   if (m.phase === "gruppe") await refreshGroupPlan(t, m.group); else { await refreshBracket(t); if (!events?.length) await refreshKOResultPanel(t); }
   await refreshLive(t);
@@ -600,6 +649,7 @@ export async function cancelTournament(channelId) {
 /** Zeitgesteuerte Schritte eines Turniers (vom Timer jede Minute aufgerufen) */
 export async function runTimers(t, now = Date.now()) {
   if (t.status === "anmeldung" && now >= t.times.close) return doDraw(t.channelId);
+  if (t.status === "checkin" && t.autoCheckin) await mutate(tKey(t.channelId), (x) => { for (const n of x.reg) if (!x.checked.includes(n)) { try { T.checkIn(x, n); } catch { /* schon drin */ } } });
   if (t.status === "checkin" && now >= t.times.checkinEnd) return doCheckinEnd(t.channelId);
   if (t.status === "gruppen" && !t.kickoffDone && now >= t.times.kickoff) return doKickoff(t.channelId);
 }
@@ -691,16 +741,15 @@ export async function startTestCup(channelId, uid, size = 8) {
 
 /** Test-Cup in einem Rutsch bis zum Anpfiff bringen: Auslosung → alle einchecken → Spieltag 1 freigeben */
 export async function fastForwardTestCup(channelId) {
-  let t = await get(tKey(channelId));
-  if (!t?.test) throw new Error("Hier läuft kein Test-Cup.");
-  if (t.status === "anmeldung") { await doDraw(channelId); t = await get(tKey(channelId)); }
-  if (t.status === "checkin") {
-    await mutate(tKey(channelId), (x) => { for (const n of x.reg) if (!x.checked.includes(n)) T.checkIn(x, n); });
-    await doCheckinEnd(channelId);
-    t = await get(tKey(channelId));
-    if (t.status === "checkin" || (t.status === "gruppen" && !t.kickoffDone)) await doKickoff(channelId);
-  }
-  return await get(tKey(channelId));
+  // Die großen Schritte (Auslosung, Gruppen posten, Anpfiff) erledigt der Minuten-Timer –
+  // so werden sie nie vom Netlify-Zeitlimit abgeschnitten (sonst fehlen z. B. Posts in Gruppe A).
+  const now = Date.now() - 1000;
+  const { value } = await mutate(tKey(channelId), (x) => {
+    if (!x.test) throw new Error("Hier läuft kein Test-Cup.");
+    x.autoCheckin = true;
+    x.times = { ...x.times, close: Math.min(x.times.close, now), checkinEnd: Math.min(x.times.checkinEnd, now), kickoff: Math.min(x.times.kickoff, now) };
+  });
+  return value;
 }
 
 /** Spiele zwischen zwei Test-Teams sofort mit Zufallsergebnis abschließen (auch über mehrere Runden). */

@@ -21,14 +21,17 @@ export default async () => {
     for (const t of await allTournaments()) if (["anmeldung", "checkin", "gruppen"].includes(t.status)) await step(`Turnier ${t.channelId}`, () => runTimers(t));
   });
   await step("Ergebnisse automatisch bestätigen", () => runAutoConfirm());
-  await step("Test-Cup", async () => { const F = await import("../lib/flow.mjs"); const t = await F.activeTournament(); if (t?.test) await F.playVirtualMatches(t.channelId); });
+  await step("Test-Cup", async () => { const F = await import("../lib/flow.mjs"); const t = await F.activeTournament(); if (t?.test) await F.playVirtualMatches(t.channelId, 1); }); // 1 Runde pro Minute – bleibt sicher unter dem Netlify-Zeitlimit
   await step("Rollen-Abgleich", () => syncManagerRoles(members));
   await step("Turnier-Rollen prüfen", () => reconcileCupRoles(members));
   await step("Vereinsfarben", async () => (await import("../lib/shop.mjs")).syncColorRoles(members));
   // 7-Tage-Aktivitätsregel ist aus (Cups werden von Hand erstellt)
   await step("Sperren", () => expireBans());
   await step("Benachrichtigungen löschen", () => runAutoDelete());
+  await step("Kurze Nachrichten löschen", async () => (await import("../lib/flow.mjs")).runTempDeletes());
+  await step("Admin-Panel", async () => (await import("../lib/flow.mjs")).refreshAdminPanel());
   await step("Aufräumen nach dem Cup", () => runCleanup(8000));
+  await step("Kanäle säubern", async () => (await import("../lib/cleanup.mjs")).runCleanJobs(8000));
   await step("Rollen-Warteschlange", () => processQueue(Math.max(3000, 26000 - (Date.now() - start))));
 };
 
