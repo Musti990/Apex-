@@ -88,7 +88,8 @@ async function refreshLinkedPanel(key) {
   if (key === "support") return SUP.refreshTicketPanel();
   if (key === "shop" || key === "feedback") return SH.refreshShopPanel();
   if (key === "bewerbung") return SUP.refreshApplyPanel();
-  const map = { rules: F.refreshRulesPanel, roles: F.refreshRolesPanel, reg: F.refreshRegPanel, team: F.refreshTeamPanel, over: F.refreshOverview, ban: B.refreshBanPanel };
+  const map = { rules: F.refreshRulesPanel, roles: F.refreshRolesPanel, reg: F.refreshRegPanel, team: F.refreshTeamPanel, over: F.refreshOverview, ban: B.refreshBanPanel, adminpanel: () => F.refreshAdminPanel({ force: true }), teamstats: F.refreshTeamStats, eastatus: F.refreshEaLinks };
+  if (key === "live") { const tc = await F.currentCup(); return tc ? F.refreshLive(tc) : null; }
   if (map[key]) return map[key]();
   const t = await F.activeTournament();
   if (!t) return;
@@ -269,6 +270,22 @@ async function adminPanelClick(i, context, cfg) {
       return t.status === "fertig" ? `🏆 Test-Cup beendet – Sieger: **${V.esc(t.podium?.[0] || "?")}**. Siegerbild & Turnierbaum stehen in den Kanälen.` : n ? `🧪 ${n} Test-Spiele gespielt – jetzt: **${t.status === "gruppen" ? `Spieltag ${t.round}` : "K.-o.-Phase"}**. Nochmal klicken für die nächste Runde.` : "🧪 Keine offenen Test-Spiele – jetzt bist du mit deinem Spiel dran (oder Ergebnis festlegen).";
     });
     case "adm:clean": return eph("", AP.cleanPick());
+    case "adm:post": return eph("", AP.panelPick());
+    case "adm:postpick": {
+      const key = i.data.values?.[0];
+      return background(i, context, async () => {
+        const ch = cfg.channels[key];
+        if (!ch) return `⚠️ Für **${CHANNEL_TYPES[key] || BASE_CHANNEL_TYPES[key] || key}** ist noch kein Kanal verknüpft – im gewünschten Kanal \`/cup-einrichten kanal typ: ${CHANNEL_TYPES[key] || BASE_CHANNEL_TYPES[key] || key}\` ausführen.`;
+        // alte Panel-Nachricht löschen, damit das neue unten im Kanal steht
+        const p = (await get("panels")) || {};
+        const old = p[key];
+        const { deleteMessage } = await import("../lib/discord.mjs");
+        for (const id of (Array.isArray(old) ? old : [old]).filter(Boolean)) await deleteMessage(ch, id).catch(() => {});
+        await mutate("panels", (x) => { delete x[key]; if (key === "over") x.over = []; }, { initial: { over: [] } });
+        await refreshLinkedPanel(key);
+        return `📌 **${CHANNEL_TYPES[key] || BASE_CHANNEL_TYPES[key] || key}** neu gepostet in <#${ch}>.`;
+      }, { update: true });
+    }
     case "adm:cleanpick": {
       const pick = new Set(i.data.values || []), all = pick.has("all"), G8 = ["A", "B", "C", "D", "E", "F", "G", "H"];
       const c = cfg.channels, chans = [];

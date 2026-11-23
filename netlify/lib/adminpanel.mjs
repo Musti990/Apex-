@@ -22,7 +22,7 @@ export function adminPanel(t) {
         "**👥 Teams** – Team hinzufügen · abmelden · Freilos + / − · Team auflösen",
         "**⚽ Spiele** – offene Spiele · Ergebnis festlegen · EA verknüpfen · TOTT posten",
         "**🚫 Sperren** – sperren · Sperre aufheben",
-        "**🧪 Test & Pflege** – Test-Cup · Test-Spiele ausspielen · Kanäle säubern · Panels · Rechte · Status",
+        "**🧪 Test & Pflege** – Test-Cup · Test-Spiele · Kanäle säubern · Panel einzeln posten · alle Panels · Rechte · Status",
       ].join("\n"),
       footer: { text: "Nur Turnierleitung · Antworten siehst nur du" },
     }],
@@ -31,7 +31,7 @@ export function adminPanel(t) {
       row(b("Team hinzufügen", "adm:add", "➕", 2), b("Team abmelden", "adm:rem", "➖", 2), b("Freilos +", "adm:fl+", "🎟️", 2), b("Freilos −", "adm:fl-", "🎟️", 2), b("Team auflösen", "adm:del", "🗑️", 4)),
       row(b("Offene Spiele", "adm:games", "📋", 2), b("Ergebnis festlegen", "adm:result", "✏️", 1), b("EA verknüpfen", "adm:ea", "🔗", 2), b("TOTT posten", "adm:tott", "⭐", 2)),
       row(b("Sperren", "ban_start", "🚫", 4), b("Sperre aufheben", "ban_lift", "🔓", 2), b("Test-Cup", "adm:test", "🧪", 2), b("Test-Spiele ausspielen", "adm:testgo", "▶️", 2)),
-      row(b("Kanäle säubern", "adm:clean", "🧹", 2), b("Panels aktualisieren", "adm:panels", "🔄", 2), b("Rechte setzen", "adm:perms", "🔐", 2), b("Status", "adm:status", "📊", 2), b("Panel neu laden", "adm:refresh", "♻️", 2)),
+      row(b("Kanäle säubern", "adm:clean", "🧹", 2), b("Panel posten", "adm:post", "📌", 2), b("Panels aktualisieren", "adm:panels", "🔄", 2), b("Rechte setzen", "adm:perms", "🔐", 2), b("Status", "adm:status", "📊", 2)),
     ],
   };
 }
@@ -55,6 +55,16 @@ export const delTeamModal = () => modal("admm:del", "Team auflösen", [
   { custom_id: "team", label: "Teamname (genau wie in der Übersicht)", max_length: 30 },
   { custom_id: "grund", label: "Grund (wird dem Manager geschickt)", max_length: 200, req: false, placeholder: "z. B. inaktiv, Regelverstoß …" },
 ]);
+
+/** 📌 Auswahl: welches Panel einzeln (neu) gepostet wird */
+export function panelPick() {
+  const o = (label, value, emoji) => ({ label, value, emoji: { name: emoji } });
+  return { content: "📌 **Welches Panel soll neu gepostet werden?**\n-# Es erscheint unten in seinem Kanal, das alte wird gelöscht. Anderer Kanal: dort `/cup-einrichten kanal typ: …` ausführen.", components: [row({ type: 3, custom_id: "adm:postpick", placeholder: "Panel wählen…", options: [
+    o("Regelwerk", "rules", "📜"), o("Rollenauswahl", "roles", "🎭"), o("Team registrieren", "reg", "✍️"), o("Meine Mannschaft", "team", "🛡️"),
+    o("Mannschaftsübersicht", "over", "👥"), o("Team-Statistiken", "teamstats", "📊"), o("Sperrliste", "ban", "🚫"), o("Support (Tickets)", "support", "🎫"),
+    o("Staff-Bewerbung", "bewerbung", "💼"), o("Live-Spielplan", "live", "📺"), o("EA-Verknüpfungen (EA-Status)", "eastatus", "📡"), o("Admin-Panel", "adminpanel", "🛠️"),
+  ] })] };
+}
 
 /** 🧹 Auswahl: welche Kanäle gesäubert werden */
 export function cleanPick() {

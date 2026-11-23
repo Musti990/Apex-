@@ -100,6 +100,8 @@ export const CHANNEL_TYPES = {
   eastatus: "EA-Status: welche Spiele EA erfasst hat (nur Staff)",
   ...Object.fromEntries(GROUP_NAMES.map((g) => ["g" + g, "Gruppe " + g])),
   ...Object.fromEntries(GROUP_NAMES.map((g) => ["r" + g, "Gruppe " + g + " · Ergebnisse"])),
+  adminpanel: "Admin-Panel (Turnierleitung)",
+  teamstats: "Team-Statistiken (All-Time)",
 };
 
 export const DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
