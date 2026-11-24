@@ -46,7 +46,7 @@ function modalText(i, key) {
 /** Eintrag in den Admin-Kanal (ohne Pings) */
 export async function audit(uid, text, channelId) {
   const cfg = await getConfig();
-  const ch = cfg.channels.admin;
+  const ch = cfg.channels.botlog || cfg.channels.admin;
   if (!ch || !text) return;
   await sendMessage(ch, {
     content: `🛠️ <@${uid}> · ${text}${channelId ? ` · in <#${channelId}>` : ""} · <t:${Math.floor(Date.now() / 1000)}:f>`,

@@ -73,6 +73,7 @@ export const BASE_CHANNEL_TYPES = {
   bewerbung: "Staff-Bewerbung",
   admin: "Admin (Bewerbungen & Ticket-Log)",
   adminpanel: "Admin-Panel (Turnierleitung)",
+  botlog: "Bot-Log (alles, was der Bot macht)",
   eaabort: "EA-Abbrüche (nur Staff)",
   eastatus: "EA-Status: welche Spiele EA erfasst hat (nur Staff)",
   teamstats: "Team-Statistiken (All-Time)",
@@ -101,6 +102,7 @@ export const CHANNEL_TYPES = {
   ...Object.fromEntries(GROUP_NAMES.map((g) => ["g" + g, "Gruppe " + g])),
   ...Object.fromEntries(GROUP_NAMES.map((g) => ["r" + g, "Gruppe " + g + " · Ergebnisse"])),
   adminpanel: "Admin-Panel (Turnierleitung)",
+  botlog: "Bot-Log (alles, was der Bot macht)",
   teamstats: "Team-Statistiken (All-Time)",
 };
 

@@ -19,28 +19,28 @@ export async function scheduleCleanup(t, delayMin = CLEANUP_DELAY_MIN) {
   walk(t.msgs);
   await mutate("cleanup", (l) => {
     if (l.some((j) => j.tid === t.channelId + ":" + t.createdAt)) return;
-    l.push({ tid: t.channelId + ":" + t.createdAt, at: Date.now() + delayMin * 60000, since, ids, channels: [...new Set(channels)] });
+    l.push({ tid: t.channelId + ":" + t.createdAt, at: Date.now() + delayMin * 60000, since, until: Date.now() + 60 * 1000, ids, channels: [...new Set(channels)] });
   }, { initial: [] });
 }
 
 /** Nachrichten eines Kanals seit `since` holen (neueste zuerst) */
-async function messagesSince(ch, since, max = 500) {
+async function messagesSince(ch, since, max = 500, until = Infinity) {
   const out = [];
   let before = null;
   while (out.length < max) {
     const batch = await discord(`/channels/${ch}/messages?limit=100${before ? `&before=${before}` : ""}`);
     if (!batch?.length) break;
-    for (const m of batch) if (Date.parse(m.timestamp) >= since) out.push(m.id);
+    for (const m of batch) { const ts = Date.parse(m.timestamp); if (ts >= since && ts <= until) out.push(m.id); }
     if (batch.length < 100 || Date.parse(batch[batch.length - 1].timestamp) < since) break;
     before = batch[batch.length - 1].id;
   }
   return out;
 }
 
-async function wipe(ch, since, cupIds = [], keep = []) {
+async function wipe(ch, since, cupIds = [], keep = [], until = Infinity) {
   const keepSet = new Set(keep);
   // Nachrichten seit Cup-Beginn + die bekannten Cup-Posts in diesem Kanal (z. B. ein älteres Live-Bild)
-  const recent = await messagesSince(ch, since);
+  const recent = await messagesSince(ch, since, 500, until); // nur bis zum Cup-Ende – spätere Posts (z. B. eine neue Anmeldeliste) bleiben
   const all = (await discord(`/channels/${ch}/messages?limit=100`)) || [];
   const known = all.filter((m) => cupIds.includes(m.id)).map((m) => m.id);
   const ids = [...new Set([...recent, ...known])].filter((id) => !keepSet.has(id));
@@ -72,6 +72,15 @@ export async function purgeExcept(ch, keep = []) {
 export async function queueClean(channels) {
   await mutate("cleanjobs", (l) => { for (const ch of channels) if (ch && !l.includes(ch)) l.push(ch); }, { initial: [] });
 }
+/** Nachrichten aller noch laufenden/offenen Cups (Anmeldelisten usw.) – werden nie gelöscht */
+async function runningCupIds() {
+  const ids = new Set();
+  const F = await import("./flow.mjs");
+  const walk = (o) => { if (!o) return; if (typeof o === "string" && /^\d{15,}$/.test(o)) ids.add(o); else if (typeof o === "object") Object.values(o).forEach(walk); };
+  for (const t of await F.allTournaments()) if (!["fertig", "abgesagt", "geloescht"].includes(t.status)) walk(t.msgs);
+  return [...ids];
+}
+
 /** Alle Panel-Nachrichten (Admin-Panel, Ergebnis-Panels usw.) – werden beim Aufräumen nie gelöscht */
 async function keepPanelIds() {
   const keep = new Set();
@@ -89,6 +98,7 @@ async function keepIds() {
   const t = await F.currentCup().catch(() => null);
   const walk = (o) => { if (!o) return; if (typeof o === "string" && /^\d{15,}$/.test(o)) keep.add(o); else if (typeof o === "object") Object.values(o).forEach(walk); };
   if (t && !["fertig", "abgesagt", "geloescht"].includes(t.status)) walk(t.msgs);
+  for (const id of await runningCupIds()) keep.add(id);
   return [...keep];
 }
 export async function runCleanJobs(budgetMs = 6000) {
@@ -111,15 +121,16 @@ export async function runCleanup(budgetMs = 8000, now = Date.now()) {
   const deadline = Date.now() + budgetMs;
   const list = (await get("cleanup")) || [];
   const due = list.filter((j) => j.at <= now);
-  const keep = due.length ? await keepPanelIds() : [];
+  const keep = due.length ? [...(await keepPanelIds()), ...(await runningCupIds())] : [];
+  let total = 0;
   for (const job of due) {
     while (job.channels.length && Date.now() < deadline - 1500) {
       const ch = job.channels[0];
-      try { await wipe(ch, job.since, job.ids || [], keep); } catch (e) { console.error("Aufräumen:", e?.message || e); }
+      try { total += await wipe(ch, job.since, job.ids || [], keep, job.until || Infinity); } catch (e) { console.error("Aufräumen:", e?.message || e); }
       job.channels.shift();
       await mutate("cleanup", (l) => { const j = l.find((x) => x.tid === job.tid); if (j) j.channels = [...job.channels]; }, { initial: [] });
     }
-    if (!job.channels.length) await mutate("cleanup", (l) => { const i = l.findIndex((x) => x.tid === job.tid); if (i >= 0) l.splice(i, 1); }, { initial: [] });
+    if (!job.channels.length) { await mutate("cleanup", (l) => { const i = l.findIndex((x) => x.tid === job.tid); if (i >= 0) l.splice(i, 1); }, { initial: [] }); (await import("./botlog.mjs")).botLog(`🧹 **Aufräumen nach dem Cup** erledigt – ${total} Nachrichten gelöscht (Panels und offene Anmeldungen bleiben).`); }
     if (Date.now() >= deadline - 1500) break;
   }
 }

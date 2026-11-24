@@ -128,6 +128,7 @@ async function checkTournament(t, left) {
           if (!s.used.includes(cid)) {
             ({ value: s } = await mutateState(t, (x) => { if (!x.used.includes(cid)) x.used.push(cid); x.aborted = { ...(x.aborted || {}), [cid]: m.id }; }));
             // Nur für die Turnierleitung (eigener Kanal) – die Teams starten ohnehin neu
+            (await import("./botlog.mjs")).botLog(`🚨 **EA-Abbruch** ignoriert · ${m.home} – ${m.away} (${ab.why})`);
             const staffCh = cfg.channels.eaabort || cfg.channels.log;
             if (staffCh) await sendMessage(staffCh, { content: `⚠️ **Abgebrochenes Spiel (nicht gewertet):** ${flagOf(m.home)} **${m.home}** ${EA.goalsOf(cand, H)}:${EA.goalsOf(cand, A)} **${m.away}** ${flagOf(m.away)} · Spiel #${m.id} – ${ab.why}. Der Bot wartet auf das neue Spiel.`, allowed_mentions: { parse: [] } });
           }

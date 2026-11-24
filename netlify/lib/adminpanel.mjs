@@ -3,7 +3,23 @@ import { COLOR } from "./data.mjs";
 const b = (label, id, emoji, style = 2, disabled = false) => ({ type: 2, style, label, custom_id: id, emoji: { name: emoji }, disabled });
 const row = (...c) => ({ type: 1, components: c });
 
-export function adminPanel(t) {
+const ST = { anmeldung: ["📝", "Anmeldung offen"], checkin: ["🕗", "Check-in läuft"], gruppen: ["⚽", "Gruppenphase"], ko: ["⚔️", "K.-o.-Phase"], fertig: ["🏁", "beendet"], abgesagt: ["❌", "abgesagt"], geloescht: ["🗑️", "ersetzt"] };
+/** Übersicht aller Cups: offene zuerst, dann die letzten beendeten */
+function cupList(cups = []) {
+  const open = cups.filter((c) => ["anmeldung", "checkin", "gruppen", "ko"].includes(c.status)).sort((a, b) => (a.times?.kickoff || 0) - (b.times?.kickoff || 0));
+  const done = cups.filter((c) => !open.includes(c) && c.status !== "geloescht").sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 3);
+  const line = (c) => {
+    const [e, txt] = ST[c.status] || ["•", c.status];
+    const extra = c.status === "anmeldung" ? ` · ${c.reg.length} Teams · Anpfiff <t:${Math.floor(c.times.kickoff / 1000)}:f>` : c.status === "checkin" ? ` · ${c.checked.length}/${c.reg.length} eingecheckt` : c.status === "gruppen" ? ` · Spieltag ${c.round}` : c.status === "fertig" && c.champion ? ` · 🏆 ${c.champion}` : "";
+    return `${e} **${c.name}**${c.test ? " 🧪" : ""} · ${txt}${extra} · <#${c.channelId}>`;
+  };
+  return [
+    `**🟢 Offene Cups (${open.length})**`, ...(open.length ? open.map(line) : ["-# keiner – mit *Neuer Cup* starten"]),
+    ...(done.length ? ["", "**⚪ Zuletzt beendet**", ...done.map(line)] : []),
+  ].join("\n").slice(0, 1800);
+}
+
+export function adminPanel(t, cups = []) {
   const st = t?.status;
   const statusLine = !t ? "💤 **Kein Cup aktiv** – mit *Neuer Cup* starten"
     : st === "anmeldung" ? `📝 **${t.name}** · Anmeldung offen · ${t.reg.length} Teams angemeldet`
@@ -17,6 +33,8 @@ export function adminPanel(t) {
       title: "⚙️ ADMIN-PANEL · APEX ARENA",
       description: [
         statusLine,
+        "",
+        cupList(cups),
         "",
         "**🏆 Cup** – Neuer Cup · Anmeldeschluss · Check-in beenden · Abbrechen",
         "**👥 Teams** – Team hinzufügen · abmelden · Freilos + / − · Team auflösen",

@@ -55,6 +55,7 @@ const PLAN = [
   { key: "admin", name: "⚙️・" + fancy("Admin"), cat: "staff", prof: "admins" },
   { key: "eaabort", name: "🚨・" + fancy("EA-Abbrueche"), cat: "staff", prof: "staff" },
   { key: "eastatus", name: "📡・" + fancy("EA-Status"), cat: "staff", prof: "staff" },
+  { key: "botlog", name: "🧾・" + fancy("Bot-Log"), cat: "staff", prof: "admins" },
   { key: "ko", name: "⚔️・" + fancy("KO-Phase"), cat: "ko", prof: "ko" },
   { key: "kor", name: "🏁・" + fancy("KO-Ergebnisse"), cat: "ko", prof: "kores" },
 ];
@@ -70,7 +71,7 @@ export function detectKey(rawName) {
   if (n.includes("kophase")) return "ko";
   const day = DAYS.findIndex((d) => n === d.toLowerCase());
   if (day >= 0) return "day" + (day + 1);
-  const map = [["adminpanel", "adminpanel"], ["teamstatistiken", "teamstats"], ["eastatus", "eastatus"], ["eaabbrueche", "eaabort"], ["anmeldung", "signup"], ["staffbewerbung", "bewerbung"], ["bewerbung", "bewerbung"], ["support", "support"], ["teamofthetournament", "tott"], ["tott", "tott"], ["willkommen", "welcome"], ["rollenauswahl", "roles"], ["benachrichtigung", "notify"], ["regelwerk", "rules"], ["registrieren", "reg"], ["meinemannschaft", "team"], ["mannschaftsuebersicht", "over"], ["livespielplan", "live"], ["halloffame", "hof"], ["sperrliste", "ban"], ["turnierleitung", "log"]];
+  const map = [["botlog", "botlog"], ["adminpanel", "adminpanel"], ["teamstatistiken", "teamstats"], ["eastatus", "eastatus"], ["eaabbrueche", "eaabort"], ["anmeldung", "signup"], ["staffbewerbung", "bewerbung"], ["bewerbung", "bewerbung"], ["support", "support"], ["teamofthetournament", "tott"], ["tott", "tott"], ["willkommen", "welcome"], ["rollenauswahl", "roles"], ["benachrichtigung", "notify"], ["regelwerk", "rules"], ["registrieren", "reg"], ["meinemannschaft", "team"], ["mannschaftsuebersicht", "over"], ["livespielplan", "live"], ["halloffame", "hof"], ["sperrliste", "ban"], ["turnierleitung", "log"]];
   for (const [kw, key] of map) if (n.includes(kw)) return key;
   if (n === "regeln") return "rules";
   if (n === "admin") return "admin";

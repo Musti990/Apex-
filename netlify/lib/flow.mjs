@@ -9,6 +9,7 @@ import { DAYS, ROUND_ROLES, RULES_VERSION, CLUBS, flagOf, isFreilos } from "./da
 import { viennaParts, viennaAt, shortDate, todayKey } from "./time.mjs";
 import { setNick, nickFor } from "./names.mjs";
 import { scheduleCleanup, purgeExcept } from "./cleanup.mjs";
+import { botLog } from "./botlog.mjs";
 
 // ---------- Hilfen ----------
 export function clubOfUser(clubs, uid) {
@@ -51,7 +52,7 @@ export async function refreshOverview() {
  *  wenn die alte Nachricht wirklich gelöscht ist. Ändert sich nichts, wird nichts geschickt. */
 export async function refreshAdminPanel({ force = false } = {}) {
   const cfg = await getConfig(); const ch = cfg.channels.adminpanel || cfg.channels.admin; if (!ch) return;
-  const payload = (await import("./adminpanel.mjs")).adminPanel(await currentCup());
+  const payload = (await import("./adminpanel.mjs")).adminPanel(await currentCup(), await allTournaments());
   const hash = JSON.stringify(payload).length + ":" + JSON.stringify(payload).slice(0, 400);
   const p = await panels();
   if (!force && p.adminpanel && p.adminpanelHash === hash) return;
@@ -228,6 +229,7 @@ export async function launchTournament({ channelId, name, times, day, date }, { 
   }
   t.msgs.panel = msg.id;
   await set(tKey(channelId), t);
+  botLog(`📝 **Neuer Cup** „${t.name}“ – Anmeldeliste in <#${channelId}> · Anpfiff <t:${Math.floor(t.times.kickoff / 1000)}:f>`);
   return t;
 }
 
@@ -259,6 +261,7 @@ export async function runSchedule(now = Date.now()) {
 
 // ---------- Auslosung ----------
 export async function doDraw(channelId) {
+  botLog(`🎲 **Anmeldeschluss** in <#${channelId}> – Auslosung & Check-in starten`);
   const cfg = await getConfig(), clubs = await getClubs();
   const busy = await activeTournament();
   const { value: t, result } = await mutate(tKey(channelId), (t) => {
@@ -302,6 +305,7 @@ export async function refreshGroupCheckin(t, gName) {
 }
 
 export async function doCheckinEnd(channelId) {
+  botLog(`✅ **Check-in beendet** in <#${channelId}> – Gruppen werden gepostet`);
   const cfg = await getConfig(), clubs = await getClubs();
   let { value: t, result } = await mutate(tKey(channelId), (t) => {
     const r = T.finishCheckin(t);
@@ -365,6 +369,7 @@ async function postKoFreigabe(t, cfg) {
 }
 
 export async function doKickoff(channelId) {
+  botLog(`🟢 **Anpfiff** in <#${channelId}> – Spieltag 1 freigegeben`);
   const cfg = await getConfig();
   const { value: t, result: first } = await mutate(tKey(channelId), (t) => { if (t.kickoffDone) return false; t.kickoffDone = true; return true; });
   if (!first) return;
@@ -482,6 +487,7 @@ export async function refreshBracket(t) {
 
 // ---------- Ergebnisse ----------
 export async function afterResult(t, m, events, byAdmin = false) {
+  if (m) botLog(`⚽ **Ergebnis** ${t.test ? "(Test) " : ""}${m.phase === "gruppe" ? `Gruppe ${m.group}` : "K.-o."} · ${m.home} **${m.h}:${m.a}**${m.pen ? ` (${m.pen[0]}:${m.pen[1]} i.E.)` : ""} ${m.away}${byAdmin ? " · festgelegt/EA" : " · bestätigt"}`);
   const cfg = await getConfig();
   const ch = resultChannelOf(cfg, m);
   if (ch) await sendTemp(ch, V.resultConfirmed(m, byAdmin)); // nur ca. 5 Sekunden sichtbar
@@ -580,6 +586,7 @@ async function koRoundSideEffects(t, cfg, e) {
 }
 
 async function finishCup(t, cfg) {
+  botLog(`🏆 **Cup beendet** „${t.name}“ – Sieger: **${t.champion || "?"}** · Aufräumen in 30 Min.`);
   const all = koAll(cfg);
   const ops = [];
   for (const c of t.qualified || []) for (const u of t.members[c] || []) ops.push({ u, rem: all, why: "Turnier beendet" });
@@ -634,6 +641,7 @@ async function displayNames(ids) {
 
 /** Turnier abbrechen (Turnierleitung): Rollen weg, Status „abgebrochen“. */
 export async function cancelTournament(channelId) {
+  botLog(`🛑 **Cup abgebrochen** in <#${channelId}>`);
   const cfg = await getConfig();
   const { value: t } = await mutate(tKey(channelId), (t) => { t.status = "geloescht"; });
   const roles = [...Object.values(cfg.roles.groups || {}), ...koAll(cfg)];

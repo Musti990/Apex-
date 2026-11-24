@@ -154,6 +154,7 @@ async function createTeam(i, uid, name, ea, logo, eaGuess = "") {
   if (result === "schon") return "Du hast bereits eine Mannschaft.";
   if (result === "eavergeben") return "Dieser EA-Club ist schon bei einem anderen Team eingetragen.";
   if (logo) await set(`logo:${name}`, { ...logo, v: v0 });
+  (await import("../lib/botlog.mjs")).botLog(`🛡️ **Neues Team** „${name}“ von <@${uid}>${ea ? ` · EA: ${ea.name}` : " · ohne EA"}${logo ? " · mit Logo" : ""}`);
   await setNick(uid, nickFor(baseNameOf(i.member), "manager", name));
   await F.refreshRegPanel(); await F.refreshOverview();
   return { content: `🛡️ **Willkommen, Manager von ${V.esc(name)}!**\n🔗 EA-Club: ${ea ? `**${V.esc(ea.name || "?")}** ✅ verknüpft` : `⚠️ EA war gerade nicht erreichbar – später unter *Meine Mannschaft → EA-Club ändern* verknüpfen`}\n${logo ? "🖼️ Logo gespeichert" : "🖼️ Kein Logo – nachholen mit `/cup-logo bild:`"}\nDeine Mannschaft findest du in ${cfg.channels.team ? `<#${cfg.channels.team}>` : "Meine-Mannschaft"}.`, embeds: logo ? [{ color: COLOR, title: name, thumbnail: { url: V.logoUrl(name, v0) } }] : [], components: [] };
@@ -188,6 +189,7 @@ async function dissolveTeam(name, reason, by) {
     const dmc = await discord("/users/@me/channels", "POST", { recipient_id: c.manager });
     if (dmc?.id) await discord(`/channels/${dmc.id}/messages`, "POST", { content: `🗑️ Dein Team **${name}** wurde von der Turnierleitung der Apex Arena aufgelöst.${reason ? `\nGrund: ${reason}` : ""}\nDu kannst jederzeit ein neues Team registrieren.` });
   } catch { /* egal */ }
+  (await import("../lib/botlog.mjs")).botLog(`🗑️ **Team aufgelöst** „${name}“ von <@${by}>${reason ? ` · Grund: ${reason}` : ""}`);
   return `🗑️ **${V.esc(name)}** wurde aufgelöst.${reason ? ` Grund: ${reason}` : ""}`;
 }
 
@@ -300,6 +302,7 @@ async function adminPanelClick(i, context, cfg) {
         const CL = await import("../lib/cleanup.mjs");
         await CL.queueClean(list);
         const n = await CL.runCleanJobs(5000); // Rest erledigt der Minuten-Timer
+        (await import("../lib/botlog.mjs")).botLog(`🧹 **Kanäle säubern** von <@${uidOf(i)}> – ${n} Nachrichten gelöscht (${list.length} Kanäle)`);
         const left = ((await get("cleanjobs")) || []).length;
         return `🧹 **${n} Nachrichten gelöscht** in ${list.length - left} von ${list.length} Kanälen.${left ? `\n⏳ ${left} Kanäle folgen in der nächsten Minute automatisch.` : " ✅ Fertig."}\n-# Panels und die Posts des laufenden Cups sind geblieben.`;
       }, { update: true });
@@ -929,7 +932,7 @@ async function modal(i, context) {
       else if (which === "new") r.sections.push([t, x]);
       else { const k = Number(which.slice(1)); if (!t && !x) { r.sections.splice(k, 1); msg = "🗑️ Abschnitt gelöscht."; } else r.sections[k] = [t || "\u200b", x || "\u200b"]; }
     });
-    later(context, () => F.refreshRulesPanel());
+    later(context, async () => { await F.refreshRulesPanel(); (await import("../lib/botlog.mjs")).botLog(`📜 **Regelwerk geändert** von <@${uid}> (${which})`); });
     return eph(msg + "\n-# Sollen alle neu bestätigen? → *Bearbeiten* → **Alle müssen neu akzeptieren**.");
   }
 
