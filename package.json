@@ -6,7 +6,10 @@
   "dependencies": {
     "@napi-rs/canvas": "^1.0.13",
     "impit": "^0.14.5",
-    "tweetnacl": "^1.0.3",
-    "@netlify/blobs": "^11.1.6"
+    "tweetnacl": "^1.0.3"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "import": "node import-netlify.mjs"
   }
 }

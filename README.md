@@ -1,61 +1,49 @@
-# ⚡ Apex Bot – Apex Arena (Netlify)
+# ⚡ Apex Bot – auf eigenem Server (Contabo, Docker)
 
-Discord-Turnierbot für **Pro Clubs**: eigene Teams mit Namen, Logo & EA-Club-ID, Cups erstellst du selbst,
-Ergebnisse & Statistiken **direkt von EA**, Live-Spielplan & Turnierbaum als Bild, TOTT (3-4-1-2), Hall of Fame,
-Team-Statistiken, Sperren, Support-Tickets, Staff-Bewerbungen. Läuft komplett auf **Netlify**.
+Gleicher Bot wie auf Netlify – nur auf deinem Server. Vorteile: **keine Zeitlimits** (keine abgeschnittenen Posts),
+Daten liegen bei dir im Ordner `data/`.
 
----
+## 1. Server vorbereiten (einmalig)
+Per SSH einloggen (Windows: PowerShell → `ssh root@DEINE-IP`, Passwort aus der Contabo-Mail), dann:
+```bash
+curl -fsSL https://get.docker.com | sh
+```
 
-## 1. Discord-Bot anlegen
-1. https://discord.com/developers/applications → **New Application** → „Apex Bot“. App Icon: `public/logo.jpg`.
-2. **General Information:** *Application ID* und *Public Key* kopieren.
-3. **Bot:** *Reset Token* → Token kopieren (geheim!). **Server Members Intent** einschalten.
-4. **OAuth2 → URL Generator:** `bot` + `applications.commands`, Recht **Administrator** → Bot einladen.
-5. Server-ID kopieren (Entwicklermodus → Rechtsklick auf den Server → *Server-ID kopieren*).
+## 2. Adresse für HTTPS
+Discord braucht **https://**. Zwei Möglichkeiten:
+- **Ohne Domain (einfach):** `DEINE-IP` mit Bindestrichen + `.sslip.io`, z. B. IP `85.215.10.20` → `85-215-10-20.sslip.io`
+- **Mit eigener Domain:** A-Eintrag `bot.deine-domain.de` → Server-IP
 
-## 2. GitHub
-Neues **privates** Repo (z. B. `Apex-Bot`) → **Add file → Upload files** → den *Inhalt* dieser ZIP hineinziehen → Commit.
+## 3. Bot hochladen & starten
+```bash
+mkdir -p /opt/apex && cd /opt/apex
+# ZIP hierher kopieren (z. B. mit WinSCP) und entpacken:
+apt-get install -y unzip && unzip Apex-Bot-Server.zip
+cp .env.example .env && nano .env     # Werte eintragen (Speichern: Strg+O, Enter, Strg+X)
+nano Caddyfile                        # DEINE-ADRESSE ersetzen
+docker compose up -d --build
+docker compose logs -f apex           # „Apex Bot läuft …“ → Strg+C zum Verlassen
+```
+Test im Browser: `https://DEINE-ADRESSE` zeigt das Logo und „Apex Bot läuft ✅“.
 
-## 3. Netlify
-1. **Add new site → Import an existing project → GitHub** → Repo wählen → Deploy.
-2. **Site configuration → Environment variables:**
+## 4. Daten von Netlify übernehmen (Teams, Logos, Cups, Statistik, Kanäle)
+Vorher auf Netlify die **neueste Version** deployen (sie hat den Export). Dann auf dem Server:
+```bash
+cd /opt/apex
+docker compose run --rm apex node import-netlify.mjs https://statuesque-cupcake-4c791e.netlify.app DEIN_SETUP_KEY
+docker compose restart apex
+```
 
-| Variable | Inhalt |
-|---|---|
-| `DISCORD_TOKEN` | Bot-Token |
-| `DISCORD_PUBLIC_KEY` | Public Key |
-| `DISCORD_APP_ID` | Application ID |
-| `DISCORD_GUILD_ID` | Server-ID |
-| `SETUP_KEY` | frei gewähltes Passwort, z. B. `apex-setup-123` |
+## 5. Discord umstellen
+1. Developer Portal → **Interactions Endpoint URL:** `https://DEINE-ADRESSE/api/interactions` → Speichern
+2. Befehle registrieren: `https://DEINE-ADRESSE/api/setup?key=DEIN_SETUP_KEY`
+3. Fertig – Netlify-Seite danach löschen oder pausieren (sonst laufen die Timer doppelt!)
 
-Optional: `EA_RESULTS=0` (EA-Ergebnisse aus), `EA_MIN_MINUTES=80` (Mindest-Spielzeit), `EA_AUTO=0` (EA komplett aus).
-Netlify Blobs (Speicher) funktioniert automatisch – kein Token nötig.
-
-3. **Deploys → Trigger deploy → Deploy site** → danach **veröffentlichen** (Published).
-
-## 4. Discord verbinden
-1. Developer Portal → **General Information → Interactions Endpoint URL:**
-   `https://DEINE-SEITE.netlify.app/api/interactions` → Speichern.
-2. Befehle registrieren (einmal im Browser öffnen):
-   `https://DEINE-SEITE.netlify.app/api/setup?key=DEIN_SETUP_KEY`
-
-## 5. In Discord einrichten
-- Bot-Rolle in der Rollenliste **ganz nach oben** ziehen.
-- `/cup-einrichten alles` → legt **alle Kategorien, Kanäle und Rollen** an, setzt Rechte, postet Panels
-  (inkl. Staff-Kanäle **📡 EA-Status** und **⚠️ EA-Abbrüche**, öffentlich **📊 Team-Statistiken**).
-- Cup erstellen: `/cup-turnier name: Apex Arena #1 anpfiff: 28.11.2026 20:00` → Liste kommt in **📝 Anmeldung**.
-- Teams: Kanal **Registrieren** → *Mannschaft registrieren* (Teamname + **EA-Club-ID**), Logo mit `/cup-logo bild:`.
-
-## Befehle
-| Befehl | Wofür |
-|---|---|
-| `/cup-einrichten` | Einrichtung (alles, rechte, panels, status …) |
-| `/cup-turnier` | neuen Cup erstellen |
-| `/cup-ergebnis` | Ergebnis melden (falls EA nicht liefert) |
-| `/cup-logo` | Team-Logo hochladen |
-| `/cup-admin` | Turnierleitung: Ergebnis festlegen, abmelden, Freilos, EA verknüpfen, TOTT, Test-Cup … |
-| `/cup-bewerbung` | Staff-Bewerbungen öffnen/schließen |
-
-## Updates
-Neue Dateien ins GitHub-Repo hochladen → Netlify baut automatisch → **veröffentlichen**.
-Nur bei neuen/geänderten Befehlen den Setup-Link nochmal öffnen.
+## Wartung
+```bash
+cd /opt/apex
+docker compose logs -f apex          # Protokoll
+docker compose restart apex          # Neustart
+docker compose up -d --build         # nach einem Update (neue Dateien hochgeladen)
+tar czf backup-$(date +%F).tgz data  # Sicherung aller Daten
+```

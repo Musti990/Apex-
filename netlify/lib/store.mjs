@@ -1,4 +1,4 @@
-import { getStore } from "@netlify/blobs";
+import { getStore } from "./local-store.mjs";
 
 const data = () => getStore({ name: "apex-bot", consistency: "strong" });
 

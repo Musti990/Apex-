@@ -1,0 +1,5 @@
+# Deine Adresse eintragen – Caddy holt das HTTPS-Zertifikat automatisch.
+# Ohne eigene Domain geht: <IP mit Bindestrichen>.sslip.io  (z. B. 85-215-10-20.sslip.io)
+DEINE-ADRESSE {
+  reverse_proxy apex:3000
+}
