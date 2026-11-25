@@ -17,6 +17,8 @@ export async function scheduleCleanup(t, delayMin = CLEANUP_DELAY_MIN) {
   // alle Nachrichten-IDs dieses Cups (Gruppenbilder, Live-Spielplan, Turnierbaum …) – auch wenn sie älter sind als der Cup
   const ids = []; const walk = (o) => { if (!o) return; if (typeof o === "string" && /^\d{15,}$/.test(o)) ids.push(o); else if (typeof o === "object") Object.values(o).forEach(walk); };
   walk(t.msgs);
+  const done = (await get("cleanupDone")) || [];
+  if (done.includes(t.channelId + ":" + t.createdAt)) return; // schon aufgeräumt
   await mutate("cleanup", (l) => {
     if (l.some((j) => j.tid === t.channelId + ":" + t.createdAt)) return;
     l.push({ tid: t.channelId + ":" + t.createdAt, at: Date.now() + delayMin * 60000, since, until: Date.now() + 60 * 1000, ids, channels: [...new Set(channels)] });
@@ -130,7 +132,13 @@ export async function runCleanup(budgetMs = 8000, now = Date.now()) {
       job.channels.shift();
       await mutate("cleanup", (l) => { const j = l.find((x) => x.tid === job.tid); if (j) j.channels = [...job.channels]; }, { initial: [] });
     }
-    if (!job.channels.length) { await mutate("cleanup", (l) => { const i = l.findIndex((x) => x.tid === job.tid); if (i >= 0) l.splice(i, 1); }, { initial: [] }); (await import("./botlog.mjs")).botLog(`🧹 **Aufräumen nach dem Cup** erledigt – ${total} Nachrichten gelöscht (Panels und offene Anmeldungen bleiben).`); }
+    if (!job.channels.length) {
+      await mutate("cleanup", (l) => { const i = l.findIndex((x) => x.tid === job.tid); if (i >= 0) l.splice(i, 1); }, { initial: [] });
+      await mutate("cleanupDone", (l) => { if (!l.includes(job.tid)) l.push(job.tid); while (l.length > 200) l.shift(); }, { initial: [] });
+      // nur melden, wenn wirklich etwas gelöscht wurde
+      if (total > 0) (await import("./botlog.mjs")).botLog(`🧹 **Aufräumen nach dem Cup** erledigt – ${total} Nachrichten gelöscht (Panels und offene Anmeldungen bleiben).`);
+      total = 0;
+    }
     if (Date.now() >= deadline - 1500) break;
   }
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { club } from "./data.mjs";
-import { teamLogo } from "./teamlogo.mjs";
+import { teamLogo, drawFit } from "./teamlogo.mjs";
 
 export function assetDir() {
   const tries = [
@@ -136,7 +136,7 @@ export async function hallOfFameImage({ podium, title, sub, seed }) {
       try {
         const fs_ = sl.flag * 1.5 * k;
         x.shadowColor = "rgba(0,0,0,.6)"; x.shadowBlur = 10 * k;
-        x.drawImage(logoImg, cx - fs_ / 2, y, fs_, fs_ * logoImg.height / logoImg.width);
+        drawFit(x, logoImg, cx - fs_ / 2, y, fs_);
         x.shadowBlur = 0;
         y += fs_ + 6 * k;
       } catch {}

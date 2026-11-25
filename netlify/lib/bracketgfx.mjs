@@ -3,7 +3,7 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import path from "node:path";
 import { assetDir, fonts } from "./image.mjs";
 import { KO_NAME } from "./data.mjs";
-import { teamLogo } from "./teamlogo.mjs";
+import { teamLogo, drawFit } from "./teamlogo.mjs";
 
 const ACC = "#ff5a1f", GOLD = "#f2c94c", TEXT = "#f2f2f5", MUTED = "#8d8f9c", LINE = "rgba(255,90,31,.55)";
 const rr = (x, X, Y, w, h, r) => { x.beginPath(); x.roundRect(X, Y, w, h, r); };
@@ -16,7 +16,7 @@ async function teamRow(x, name, score, X, Y, W, h, state) {
   if (!empty) {
     const l = await teamLogo(name).catch(() => null);
     const s = h - 14;
-    if (l) x.drawImage(l, X + 12, Y + 7, s, s * l.height / l.width);
+    if (l) drawFit(x, l, X + 12, Y + 7, s);
     else { x.fillStyle = "#2a2d38"; x.beginPath(); x.arc(X + 12 + s / 2, Y + h / 2, s / 2, 0, 7); x.fill(); x.fillStyle = MUTED; x.font = `${Math.round(s * 0.55)}px "Bebas Neue"`; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(String(name)[0].toUpperCase(), X + 12 + s / 2, Y + h / 2 + 1); }
   }
   x.textAlign = "left"; x.textBaseline = "middle";
@@ -104,7 +104,7 @@ export async function bracketImage(t) {
     const l = await teamLogo(champ).catch(() => null);
     fit(x, champ.toUpperCase(), '{s}px "Bebas Neue"', 42, boxW - (l ? 80 : 30));
     const tw = x.measureText(champ.toUpperCase()).width, ls = 36, blockW = tw + (l ? ls + 10 : 0), lx = X + boxW / 2 - blockW / 2, cy = Y + 64;
-    if (l) x.drawImage(l, lx, cy - ls / 2, ls, ls * l.height / l.width);
+    if (l) drawFit(x, l, lx, cy - ls / 2, ls);
     x.textAlign = "left"; x.fillStyle = "#fff"; x.shadowColor = "rgba(242,201,76,.6)"; x.shadowBlur = 18; x.fillText(champ.toUpperCase(), lx + (l ? ls + 10 : 0), cy + 2); x.shadowBlur = 0;
   }
   x.textAlign = "right"; x.font = "600 13px Montserrat"; x.fillStyle = MUTED; x.fillText("* nach Elfmeterschießen", W - 40, H - 26);

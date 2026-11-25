@@ -3,7 +3,7 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import path from "node:path";
 import { assetDir, fonts } from "./image.mjs";
 import { club } from "./data.mjs";
-import { teamLogo } from "./teamlogo.mjs";
+import { teamLogo, drawFit } from "./teamlogo.mjs";
 
 const GROUP = { goalkeeper: "gk", defender: "def", midfielder: "mid", forward: "fwd" };
 const LINES = [ // 3-4-1-2
@@ -75,7 +75,7 @@ async function card(x, p, cx, y, short, isPot) {
   // Note + Position
   x.fillStyle = isPot ? GOLD : "#ffffff"; x.font = '54px "Bebas Neue"'; x.fillText(p.avg.toFixed(1), X + 16, y + 10);
   x.fillStyle = isPot ? GOLD : "#ff9a6b"; x.font = "800 13px Montserrat"; x.fillText(short, X + 18, y + 66);
-  const fl = await flagImg(p.club); if (fl) x.drawImage(fl, X + w - 62, y + 14, 46, 46);
+  const fl = await flagImg(p.club); if (fl) drawFit(x, fl, X + w - 62, y + 14, 46);
   if (isPot) star(x, X + w - 39, y + 76, 9, GOLD);
   // Name & Verein
   x.fillStyle = TEXT; fit(x, p.name, "700 {s}px Montserrat", 19, w - 24, 11); center(x, p.name, cx, y + 92);
@@ -138,7 +138,7 @@ export async function tottImage({ title, team, matches }) {
     const fl = await flagImg(p.club);
     x.fillStyle = "#ffffff"; fit(x, p.name.toUpperCase(), '{s}px "Bebas Neue"', 64, PW - 260, 28);
     const nw = x.measureText(p.name.toUpperCase()).width, fx = W / 2 - (nw + (fl ? 70 : 0)) / 2;
-    if (fl) x.drawImage(fl, fx, by + 52, 54, 54);
+    if (fl) drawFit(x, fl, fx, by + 52, 54);
     x.fillText(p.name.toUpperCase(), fx + (fl ? 70 : 0), by + 46);
     x.fillStyle = MUTED; x.font = "600 18px Montserrat";
     center(x, `${p.club}  ·  Ø ${p.avg.toFixed(1)}  ·  ${p.games} Spiele  ·  ${p.goals} Tore  ·  ${p.assists} Vorlagen${p.mom ? `  ·  ${p.mom}× MOTM` : ""}`, W / 2, by + 124);

@@ -4,7 +4,7 @@ import path from "node:path";
 import { assetDir, fonts } from "./image.mjs";
 import { FORMATS, KO_SIZE, KO_NAME, isFreilos } from "./data.mjs";
 import { standings, currentMatches, koRoundName } from "./tournament.mjs";
-import { teamLogo } from "./teamlogo.mjs";
+import { teamLogo, drawFit } from "./teamlogo.mjs";
 
 const ACC = "#ff5a1f", GOLD = "#f2c94c", TEXT = "#f2f2f5", MUTED = "#a9abb8", GREEN = "#2ecc71", RED = "#ff4d4d";
 const rr = (x, X, Y, w, h, r) => { x.beginPath(); x.roundRect(X, Y, w, h, r); };
@@ -17,7 +17,7 @@ function bg(x, W, H) {
 }
 async function logoAt(x, name, X, Y, s) {
   const l = await teamLogo(name).catch(() => null);
-  if (l) { x.drawImage(l, X, Y, s, s * l.height / l.width); return true; }
+  if (l) { drawFit(x, l, X, Y, s); return true; }
   x.fillStyle = "#2a2d38"; rr(x, X, Y, s, s, s * 0.25); x.fill();
   x.fillStyle = MUTED; x.font = `${Math.round(s * 0.5)}px "Bebas Neue"`; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(String(name).slice(0, 1).toUpperCase(), X + s / 2, Y + s / 2 + 1); x.textAlign = "left";
   return false;

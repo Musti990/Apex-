@@ -2,7 +2,7 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import path from "node:path";
 import { assetDir, fonts } from "./image.mjs";
-import { teamLogo } from "./teamlogo.mjs";
+import { teamLogo, drawFit } from "./teamlogo.mjs";
 
 const ACC = "#ff5a1f", GOLD = "#f2c94c", TEXT = "#f2f2f5", MUTED = "#8d8f9c", GREEN = "#2ecc71", RED = "#ff4d4d";
 const rr = (x, X, Y, w, h, r) => { x.beginPath(); x.roundRect(X, Y, w, h, r); };
@@ -38,7 +38,7 @@ export async function teamStatsImage(clubs, stats) {
     const cy = y + (rowH - 6) / 2;
     x.textAlign = "center"; x.font = '30px "Bebas Neue"'; x.fillStyle = "#fff"; x.fillText(String(k + 1), 70, cy + 2);
     const l = await teamLogo(r.name).catch(() => null);
-    if (l) x.drawImage(l, 110, cy - 20, 40, 40 * l.height / l.width);
+    if (l) drawFit(x, l, 110, cy - 20, 40);
     else { x.fillStyle = "#2a2d38"; x.beginPath(); x.arc(130, cy, 19, 0, 7); x.fill(); x.fillStyle = MUTED; x.font = '22px "Bebas Neue"'; x.fillText(r.name[0].toUpperCase(), 130, cy + 2); }
     x.textAlign = "left"; fit(x, r.name.toUpperCase(), '{s}px "Bebas Neue"', 32, 440); x.fillStyle = "#fff"; x.fillText(r.name.toUpperCase(), 175, cy + 2);
     x.textAlign = "center"; x.font = '28px "Bebas Neue"';
