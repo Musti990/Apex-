@@ -1,14 +1,27 @@
 // Warteschlange für Rollen-Änderungen. Discord begrenzt, wie schnell Rollen vergeben werden dürfen –
 // deshalb werden Änderungen gesammelt und in mehreren Durchläufen abgearbeitet.
-import { get, mutate } from "./store.mjs";
+import { get, mutate, getConfig } from "./store.mjs";
 import { addRole, removeRole } from "./discord.mjs";
 
 const KEY = "rolequeue";
 
+/**
+ * Turnier-Rollen (Gruppen, K.-o.-Runden, „KO Phase“) werden nur noch VERGEBEN, nie entfernt.
+ * Grund: Das Entfernen vieler Rollen auf einmal löst Discord-Rate-Limits aus und hält dann
+ * das Vergeben der K.-o.-Rollen auf. Alte Turnier-Rollen entfernt das Team bei Bedarf von Hand.
+ * Wieder einschalten (alte Verhalten): Umgebungsvariable CUP_ROLES_REMOVE=1
+ */
+async function cupRoleIds() {
+  if (process.env.CUP_ROLES_REMOVE === "1") return new Set();
+  const r = (await getConfig()).roles || {};
+  return new Set([...Object.values(r.groups || {}), ...Object.values(r.rounds || {}), r.koPhase].filter(Boolean));
+}
+
 /** ops: [{ u: Nutzer-ID, add: [Rollen-IDs], rem: [Rollen-IDs], why: "Grund" }] */
 export async function enqueue(ops) {
+  const keep = await cupRoleIds();
   const clean = ops
-    .map((o) => ({ u: o.u, add: (o.add || []).filter(Boolean), rem: (o.rem || []).filter(Boolean), why: o.why || "Apex Arena" }))
+    .map((o) => ({ u: o.u, add: (o.add || []).filter(Boolean), rem: (o.rem || []).filter((r) => r && !keep.has(r)), why: o.why || "Apex Arena" }))
     .filter((o) => o.u && (o.add.length || o.rem.length));
   if (!clean.length) return;
   await mutate(KEY, (q) => {
@@ -38,8 +51,9 @@ export async function processQueue(budgetMs = 8000) {
     }
     if (!op) break;
     let ok = true;
+    const keep = await cupRoleIds(); // auch ältere Aufträge in der Warteschlange: Turnier-Rollen nicht entfernen
     for (const r of op.add) if (!(await addRole(op.u, r, op.why))) ok = false;
-    for (const r of op.rem) if (!(await removeRole(op.u, r, op.why))) ok = false;
+    for (const r of op.rem) if (!keep.has(r) && !(await removeRole(op.u, r, op.why))) ok = false;
     await mutate(KEY, (list) => {
       const i = list.findIndex((x) => x.id === op.id);
       if (i < 0) return;
