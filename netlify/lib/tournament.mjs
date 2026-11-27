@@ -232,7 +232,10 @@ export function report(t, matchId, clubName, h, a, pen) {
 export function adminSet(t, matchId, h, a, pen) {
   const m = t.matches.find((x) => x.id === matchId);
   if (!m) throw new Error(`Spiel #${matchId} gibt es nicht.`);
-  if (!isEditable(t, m)) throw new Error("Dieses Spiel kann nicht mehr geändert werden (die Runde ist schon vorbei).");
+  // Turnierleitung: jedes Gruppenspiel änderbar, solange die Gruppenphase läuft (Tabelle rechnet sich neu).
+  // K.-o.: weiterhin nur die laufende Runde (sonst stünde der falsche Sieger schon in der nächsten Runde).
+  const groupFix = m.phase === "gruppe" && t.status === "gruppen";
+  if (!isEditable(t, m) && !groupFix) throw new Error("Dieses Spiel kann nicht mehr geändert werden (die Runde ist schon vorbei).");
   pen = normalize(m, h, a, pen);
   Object.assign(m, { h, a, pen, status: "fertig" });
   return m;
